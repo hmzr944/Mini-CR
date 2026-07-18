@@ -1,0 +1,36 @@
+# Secrets
+telegram_config.json
+.env
+
+# Runtime state (régénéré par le bot)
+live_state_v33.json
+live_state_v33.bak
+live_state_v33_*.dbak
+live_state_v33.tmp
+scan_history_v33.json
+live_logs/
+incubator_state.json
+
+# Données backtest (trop volumineuses)
+backtest_data/
+backtest_results/
+data_15m_cache/
+replay_cache/
+sim_cache/
+
+# Scripts d'audit/recherche one-shot
+archive/
+overnight_report_*.md
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+venv/
+
+# Divers
+.agents/
+skills-lock.json
+*.log
