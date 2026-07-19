@@ -367,6 +367,34 @@ def run_backtest(sym_data: dict, start_ts: pd.Timestamp, end_ts: pd.Timestamp,
         bull_macro = (not math.isnan(btc_e20_4h) and not math.isnan(btc_e50_4h)
                       and btc_e20_4h > btc_e50_4h)
 
+        # BUG FIX 19/07/2026 : chaos_regime totalement absent de la reconstruction
+        # (récupéré verbatim depuis live_monitor_v33.py) — ATR BTC vs médiane 30j.
+        chaos_regime = False
+        btc_atr_b = float(btc_sd["atr14"][b])
+        if btc_close > 0 and not math.isnan(btc_atr_b) and b >= 30:
+            btc_atr_pct = btc_atr_b / btc_close
+            past_atrs = [float(btc_sd["atr14"][max(0, b - i)]) /
+                         (float(btc_sd["close"][max(0, b - i)]) + 1e-10)
+                         for i in range(1, 31)]
+            med_atr_pct = sorted(past_atrs)[15]
+            if btc_atr_pct / (med_atr_pct + 1e-10) > 2.0:
+                chaos_regime = True
+
+        # BUG FIX 19/07/2026 : btc_1h_filter était accepté en paramètre mais
+        # jamais appliqué — laissait passer ~2× trop de trades vs référence
+        # (196 vs 93 sur la fenêtre de validation). Logique récupérée verbatim
+        # depuis live_monitor_v33.py : micro-trend BTC 3H, seuil ±0.3%.
+        btc_1h_bias = None
+        if btc_1h_filter and b >= 3:
+            cl_now = btc_close
+            cl_3h  = float(btc_sd["close"][b - 3])
+            if cl_3h > 0 and not math.isnan(cl_now):
+                m3h = (cl_now - cl_3h) / cl_3h
+                if m3h > 0.003:
+                    btc_1h_bias = "bull"
+                elif m3h < -0.003:
+                    btc_1h_bias = "bear"
+
         ranging_regime = False
         if not math.isnan(btc_adx) and not math.isnan(btc_bbw) and not math.isnan(btc_bbwq):
             if btc_adx < ADX_RANGE_MAX and btc_bbw <= btc_bbwq:
@@ -395,6 +423,28 @@ def run_backtest(sym_data: dict, start_ts: pd.Timestamp, end_ts: pd.Timestamp,
             cl24 = float(btc_sd["close"][b - 24])
             if cl24 > 0 and (btc_close - cl24) / cl24 < BTC_CRASH_THRESH:
                 btc_24h_crash = True
+
+        # BUG FIX 19/07/2026 : market panic (corrélation extrême entre altcoins)
+        # défini (PANIC_VEL/PANIC_THRESH) mais jamais implémenté. Panique DOWN
+        # (≥80% des actifs -2.5%/4H) bloque C/D LONG ; panique UP bloque SHORT.
+        market_panic_down = market_panic_up = False
+        if b >= 4:
+            moves = []
+            for s2, sd2 in sym_data.items():
+                if s2 == "BTC-USDT":
+                    continue
+                b2 = sd2["ts_to_pos"].get(bar_ts)
+                if b2 is None or b2 < 4:
+                    continue
+                c_now = float(sd2["close"][b2])
+                c_4h  = float(sd2["close"][b2 - 4])
+                if c_4h > 0 and not math.isnan(c_now):
+                    moves.append((c_now - c_4h) / c_4h)
+            if moves:
+                down = sum(1 for m in moves if m < -PANIC_VEL) / len(moves)
+                up   = sum(1 for m in moves if m > PANIC_VEL) / len(moves)
+                market_panic_down = down >= PANIC_THRESH
+                market_panic_up   = up >= PANIC_THRESH
 
         score_min_c_eff = (SCORE_MIN - 3) if bull_macro else SCORE_MIN
         max_margin = equity * MAX_MARGIN_RATIO
@@ -428,6 +478,10 @@ def run_backtest(sym_data: dict, start_ts: pd.Timestamp, end_ts: pd.Timestamp,
                 ck = sym + "C"
                 if bar - cooldown_tracker.get(ck, -9999) >= COOLDOWN_BARS:
                     action = check_pattern_c(sd, bar, adx_val)
+                    if (btc_1h_bias == "bear" and action == "BUY") or (btc_1h_bias == "bull" and action == "SELL"):
+                        action = None
+                    if (market_panic_down and action == "BUY") or (market_panic_up and action == "SELL"):
+                        action = None
                     if action is not None and not btc_24h_crash:
                         score = int(sd["buy_sc"][bar]) if action == "BUY" else int(sd["sell_sc"][bar])
                         if action == "SELL" and btc_near_ath:
@@ -469,6 +523,10 @@ def run_backtest(sym_data: dict, start_ts: pd.Timestamp, end_ts: pd.Timestamp,
                     dk = sym + "D"
                     if bar - cooldown_tracker.get(dk, -9999) >= COOLDOWN_BARS:
                         action = check_pattern_d(sd, bar, adx_val)
+                        if (btc_1h_bias == "bear" and action == "BUY") or (btc_1h_bias == "bull" and action == "SELL"):
+                            action = None
+                        if (market_panic_down and action == "BUY") or (market_panic_up and action == "SELL"):
+                            action = None
                         if action is not None and adx_val >= adx_min_d and not btc_24h_crash:
                             score = int(sd["buy_sc"][bar]) if action == "BUY" else int(sd["sell_sc"][bar])
                             if not (action == "SELL" and btc_near_ath) and score >= score_min_d:
@@ -533,39 +591,6 @@ def run_backtest(sym_data: dict, start_ts: pd.Timestamp, end_ts: pd.Timestamp,
                                         total_margin_used += margin
                                         syms_in_pos.add(sym)
 
-            # ── Pattern S ────────────────────────────────────────────────────
-            if bear_macro and sym not in syms_in_pos and sym not in PATTERN_S_BLACKLIST:
-                s_margin_used = sum(p["margin"] for p in open_positions.values() if p.get("pattern") == "S")
-                if s_margin_used < S_MARGIN_CAP:
-                    sk = sym + "S"
-                    if bar - cooldown_tracker.get(sk, -9999) >= COOLDOWN_BARS_S:
-                        if check_pattern_s(sd, bar, adx_val) == "SELL":
-                            score = int(sd["sell_sc"][bar])
-                            if score >= SCORE_MIN_S:
-                                entry_bar = bar + 1 if next_bar_entry else bar
-                                if entry_bar < len(sd["open"]):
-                                    open_px = float(sd["open"][entry_bar])
-                                    ep = open_px * (1 - SLIPPAGE)
-                                    atr = float(sd["atr14"][bar])
-                                    if math.isnan(atr) or atr <= 0:
-                                        atr = ep * 0.015
-                                    sl_pct = max(ATR_SL_MIN_S, min(ATR_SL_MAX_S, ATR_SL_MULT_S * atr / (ep + 1e-10)))
-                                    tp_pct = sl_pct * RR_RATIO_S
-                                    sl, tp = ep * (1 + sl_pct), ep * (1 - tp_pct)
-                                    entry_ts = sd["ts_index"][entry_bar] if next_bar_entry else bar_ts
-                                    margin = min(S_MARGIN_CAP - s_margin_used, equity * 0.10 * combined_scale)
-                                    if margin > 1 and total_margin_used + margin <= max_margin:
-                                        pk = sk + str(bar_ts)
-                                        open_positions[pk] = {
-                                            "sym": sym, "side": "short", "pattern": "S",
-                                            "entry_ts": entry_ts, "entry_price": ep,
-                                            "sl": sl, "tp": tp, "margin": margin,
-                                            "leverage": BASE_LEVERAGE_S, "score": score,
-                                        }
-                                        cooldown_tracker[sk] = bar
-                                        total_margin_used += margin
-                                        syms_in_pos.add(sym)
-
             # ── Pattern R (régime range uniquement) ─────────────────────────
             if ranging_regime and not r_paused and sym not in syms_in_pos and not survive_mode:
                 rk = sym + "R"
@@ -602,6 +627,71 @@ def run_backtest(sym_data: dict, start_ts: pd.Timestamp, end_ts: pd.Timestamp,
                                     cooldown_tracker[rk] = bar
                                     total_margin_used += margin
                                     syms_in_pos.add(sym)
+
+        # ── Pattern S — passe dédiée, max 1 position/bar ──────────────────────
+        # BUG FIX 19/07/2026 : reconstruction initiale ouvrait 1 position S PAR
+        # SYMBOLE éligible (jusqu'à 25/bar), causant N=25 vs référence N~5 sur
+        # 13 mois. Logique exacte récupérée verbatim depuis live_monitor_v33.py :
+        # gate asset 4H bear individuel (en plus du bear_macro BTC), chaos/survive
+        # exclus, near_ath exclus, candidats classés par score, 1 SEUL retenu,
+        # sizing = budget restant entier (pas 10% d'equity par trade).
+        if bear_macro and not chaos_regime and not survive_mode:
+            s_margin_used = sum(p["margin"] for p in open_positions.values() if p.get("pattern") == "S")
+            s_budget = S_MARGIN_CAP - s_margin_used
+            if s_budget > 0:
+                candidates_s = []
+                for sym in SYMBOLS:
+                    if sym == "BTC-USDT" or sym in PATTERN_S_BLACKLIST or sym in syms_in_pos:
+                        continue
+                    sd = sym_data.get(sym)
+                    if sd is None:
+                        continue
+                    bar = sd["ts_to_pos"].get(bar_ts)
+                    if bar is None or bar < 52:
+                        continue
+                    if bar - cooldown_tracker.get(sym + "S", -9999) < COOLDOWN_BARS_S:
+                        continue
+                    e20_4h_s = float(sd["ema20_4h"][bar]); e50_4h_s = float(sd["ema50_4h"][bar])
+                    if math.isnan(e20_4h_s) or math.isnan(e50_4h_s) or e20_4h_s > e50_4h_s:
+                        continue  # asset lui-même doit être baissier 4H
+                    adx_val_s = float(sd["adx"][bar])
+                    if math.isnan(adx_val_s):
+                        continue
+                    if check_pattern_s(sd, bar, adx_val_s) != "SELL":
+                        continue
+                    if market_panic_up or btc_near_ath:
+                        continue
+                    score = int(sd["sell_sc"][bar])
+                    if score < SCORE_MIN_S:
+                        continue
+                    candidates_s.append({"sym": sym, "bar": bar, "score": score})
+                candidates_s.sort(key=lambda c: c["score"], reverse=True)
+                for c in candidates_s[:1]:
+                    sym, bar, score = c["sym"], c["bar"], c["score"]
+                    sd = sym_data[sym]
+                    entry_bar = bar + 1 if next_bar_entry else bar
+                    if entry_bar >= len(sd["open"]):
+                        continue
+                    open_px = float(sd["open"][entry_bar])
+                    ep = open_px * (1 - SLIPPAGE)
+                    atr = float(sd["atr14"][bar])
+                    if math.isnan(atr) or atr <= 0:
+                        atr = ep * 0.015
+                    sl_pct = max(ATR_SL_MIN_S, min(ATR_SL_MAX_S, ATR_SL_MULT_S * atr / (ep + 1e-10)))
+                    tp_pct = sl_pct * RR_RATIO_S
+                    sl, tp = ep * (1 + sl_pct), ep * (1 - tp_pct)
+                    entry_ts = sd["ts_index"][entry_bar] if next_bar_entry else bar_ts
+                    margin = min(s_budget, S_MARGIN_CAP)
+                    if total_margin_used + margin <= max_margin:
+                        pk = sym + "S" + str(bar_ts)
+                        open_positions[pk] = {
+                            "sym": sym, "side": "short", "pattern": "S",
+                            "entry_ts": entry_ts, "entry_price": ep,
+                            "sl": sl, "tp": tp, "margin": margin,
+                            "leverage": BASE_LEVERAGE_S, "score": score,
+                        }
+                        cooldown_tracker[sym + "S"] = bar
+                        total_margin_used += margin
 
     return trades, equity_curve, equity
 
