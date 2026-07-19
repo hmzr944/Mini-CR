@@ -33,6 +33,14 @@ from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
 from rich import box
+from prism.strategy import (  # single source of truth (re-migré 19/07/2026)
+    ADX_MIN_C, SQUEEZE_BARS_C, VOL_RATIO_C, ADX_MIN_MOM, RSI_MOM_MIN, RSI_MOM_MAX,
+    VOL_RATIO_MOM, ADX_MIN_S, RSI_S_MIN, RSI_S_MAX, RSI_LONG_MIN_D, RSI_LONG_MAX_D,
+    RSI_SHORT_MIN_D, RSI_SHORT_MAX_D, SCORE_MIN_V, VOL_MULT_V, _ADX_1BAR,
+    compute_indicators, prepare, _compute_scores, _score_size_mult,
+    check_pattern_c, check_pattern_d, check_pattern_r, check_pattern_s,
+    check_pattern_mom, check_pattern_v,
+)
 
 try:
     import telegram_notif as _tg
@@ -182,9 +190,6 @@ ATR_SL_MULT      = 1.5
 RR_RATIO         = 4.0  # abaissé 5→4 (v33.9 — audit 03/07 : +117pp OOS_3M 4/5)
 ATR_SL_MIN_C     = 0.006
 ATR_SL_MAX_C     = 0.025
-SQUEEZE_BARS_C   = 3   # 3→4 identique OOS, IS +40%, bear amélioré
-VOL_RATIO_C      = 1.90  # abaissé 2.0→1.90 (v33.9 — débloque OP+SOL, +117pp OOS_3M)
-ADX_MIN_C        = 18    # abaissé 20→18 (audit 25/06 : +371% vs +345% REF, WR 71%)
 TIME_STOP_H      = 96    # relevé 72→96h (audit 25/06 : +360% vs +345%, WR C 80%)
 COOLDOWN_BARS    = 8    # relevé 5→8 : empêche re-entrée même journée après SL (29/06)
 BASE_LEVERAGE    = 10
@@ -226,23 +231,7 @@ PATTERN_C_BLACKLIST = {
 }
 
 # RSI zones Pattern D — resserrées (évite les zones de retournement 42-72 / 28-58)
-RSI_LONG_MIN_D  = 62   # 48→62 : élimine les D-LONG faibles (RSI<62 = momentum insuffisant) — validé IS+OOS (30/06)
-RSI_LONG_MAX_D  = 65   # était 72 — évite le sur-achat (momentum trop mature)
-RSI_SHORT_MIN_D = 35   # était 28 — évite la sur-vente extrême
-RSI_SHORT_MAX_D = 52   # était 58 — zone de trend baissier confirmé
 
-def _score_size_mult(score: int, pattern: str) -> float:
-    """Multiplie la taille de position selon la conviction du signal (score).
-    v33.5 : Kelly calibré — réduit signaux faibles, double les signaux forts.
-    v33.7 : D différencié — sc>=92 → 1.8x — validé IS+OOS 4/4 (01/07)."""
-    if pattern == "C":
-        if score >= 85: return 2.00   # WR=60% RR=5 → Kelly optimal
-        if score >= 75: return 1.20
-        return 0.80                   # signal faible → taille réduite
-    # Pattern D — tiers différenciés (v33.7)
-    if score >= 92: return 1.80   # sc>=92 : WR supérieur → demi-Kelly — validé IS+OOS 4/4 (01/07)
-    if score >= 85: return 1.20   # sc 85-91 : tier standard
-    return 1.00
 
 # ── Pattern R — Mean Reversion (marché latéral) ───────────────────────────────
 # Activé quand BTC ADX < 18 ET BBW sous sa médiane → marché sans direction
@@ -278,9 +267,6 @@ RR_RATIO_S           = 4.0
 ATR_SL_MULT_S        = 1.5
 ATR_SL_MIN_S         = 0.006
 ATR_SL_MAX_S         = 0.025
-RSI_S_MIN            = 45
-RSI_S_MAX            = 65
-ADX_MIN_S            = 20
 COOLDOWN_BARS_S      = 6
 PATTERN_S_BLACKLIST  = {"STX-USDT", "LINK-USDT", "DOGE-USDT", "OP-USDT", "AVAX-USDT"}  # audit 03/07
 
@@ -289,10 +275,6 @@ PATTERN_S_BLACKLIST  = {"STX-USDT", "LINK-USDT", "DOGE-USDT", "OP-USDT", "AVAX-U
 # RSI 40-50 dip + rebond amorcé (RSI[bar] > RSI[bar-1]) + EMA9>21>50 + close>EMA50
 # Audit 08/07 : + vol_ratio>1.2 (filtre rebond) + SCORE_MIN 60→65 → IS PF 0.84→2.40 OOS PF 1.02→2.69
 SCORE_MIN_MOM     = 65
-RSI_MOM_MIN       = 40
-RSI_MOM_MAX       = 50
-ADX_MIN_MOM       = 20
-VOL_RATIO_MOM     = 1.2      # volume minimum sur bougie rebond (filtre clé audit 08/07)
 RISK_PCT_MOM      = 0.08     # 8% du capital (Kelly 11.2% → demi-Kelly conservateur)
 BASE_LEVERAGE_MOM = 8
 RR_RATIO_MOM      = 3.0      # RR plus court que C/D : pullback = mouvement cible limité
@@ -315,7 +297,6 @@ OI_SCORE_ADJ        =  3
 # ── Pattern V — Volume Surge (hybride R/C) ────────────────────────────────────
 # Détecte les mouvements institutionnels (vol 3×+ normal) aux extrêmes des BB
 # Indépendant du régime — valide en TREND et RANGE
-SCORE_MIN_V     = 999   # désactivé v33.9 — N=1 WR=0% OOS_3M, drag pur
 RISK_PCT_V      = 0.05    # risque minimal : évite le survive_mode sur perte unique
 BASE_LEVERAGE_V = 8
 RR_RATIO_V      = 3.0
@@ -323,7 +304,6 @@ ATR_SL_MULT_V   = 1.2
 ATR_SL_MIN_V    = 0.005
 ATR_SL_MAX_V    = 0.020
 COOLDOWN_BARS_V = 5
-VOL_MULT_V      = 3.0
 
 OKX_URL       = "https://www.okx.com/api/v5/market/history-candles"
 OKX_URL_FALLBACK = "https://my.okx.com/api/v5/market/history-candles"
@@ -533,312 +513,21 @@ def fetch_live(inst_id: str, limit: int = 350) -> pd.DataFrame | None:
     return df
 
 # ── Indicateurs (identiques v33) ────────────────────────────────────────────
-def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
-    c, h, l, v = df["close"], df["high"], df["low"], df["volume"]
-    df["ema9"]  = c.ewm(span=9,  adjust=False).mean()
-    df["ema21"] = c.ewm(span=21, adjust=False).mean()
-    df["ema50"] = c.ewm(span=50, adjust=False).mean()
-    ema12 = c.ewm(span=12, adjust=False).mean()
-    ema26 = c.ewm(span=26, adjust=False).mean()
-    ml    = ema12 - ema26
-    ms    = ml.ewm(span=9, adjust=False).mean()
-    df["macd_hist"]  = ml - ms
-    df["macd_slope"] = (ml - ms).diff()
-    delta = c.diff()
-    gain  = delta.clip(lower=0).ewm(com=13, adjust=False).mean()
-    loss  = (-delta.clip(upper=0)).ewm(com=13, adjust=False).mean()
-    df["rsi14"] = 100 - 100 / (1 + gain / (loss + 1e-10))
-    bb_mid         = c.rolling(20).mean()
-    bb_std         = c.rolling(20).std()
-    df["bb_upper"] = bb_mid + 2 * bb_std
-    df["bb_lower"] = bb_mid - 2 * bb_std
-    bbw            = (df["bb_upper"] - df["bb_lower"]) / (bb_mid + 1e-10)
-    df["bbw"]      = bbw
-    df["bbw_q15"]  = bbw.rolling(40).quantile(0.15)
-    df["vol_ratio"] = v / (v.rolling(20).mean() + 1e-10)
-    tp_val = (h + l + c) / 3
-    df["vwap"] = (tp_val * v).rolling(24).sum() / (v.rolling(24).sum() + 1e-10)
-    low14, high14 = l.rolling(14).min(), h.rolling(14).max()
-    sk = 100 * (c - low14) / (high14 - low14 + 1e-10)
-    df["stoch_k"] = sk
-    df["stoch_d"] = sk.rolling(3).mean()
-    tr   = pd.concat([h - l, (h - c.shift()).abs(), (l - c.shift()).abs()], axis=1).max(axis=1)
-    dm_p = (h - h.shift()).clip(lower=0)
-    dm_m = (l.shift() - l).clip(lower=0)
-    dm_p = dm_p.where(dm_p > dm_m, 0)
-    dm_m = dm_m.where(dm_m > dm_p, 0)
-    atr14 = tr.ewm(com=13, adjust=False).mean()
-    dip   = 100 * dm_p.ewm(com=13, adjust=False).mean() / (atr14 + 1e-10)
-    dim   = 100 * dm_m.ewm(com=13, adjust=False).mean() / (atr14 + 1e-10)
-    dx    = 100 * (dip - dim).abs() / (dip + dim + 1e-10)
-    df["atr14"]    = atr14
-    df["adx"]      = dx.ewm(com=13, adjust=False).mean()
-    df["di_plus"]  = dip
-    df["di_minus"] = dim
-    df_4h    = df[["close"]].resample("4h").last().dropna()
-    ema20_4h = df_4h["close"].ewm(span=20, adjust=False).mean()
-    ema50_4h = df_4h["close"].ewm(span=50, adjust=False).mean()
-    df["ema20_4h"] = ema20_4h.reindex(df.index, method="ffill")
-    df["ema50_4h"] = ema50_4h.reindex(df.index, method="ffill")
-    df_1d   = df[["close"]].resample("1D").last().dropna()
-    ema50d  = df_1d["close"].ewm(span=50,  adjust=False).mean()
-    ema200d = df_1d["close"].ewm(span=200, adjust=False).mean()
-    df["ema50d"]  = ema50d.reindex(df.index,  method="ffill")
-    df["ema200d"] = ema200d.reindex(df.index, method="ffill")
-    return df
 
-def _compute_scores(sd: dict, n: int):
-    buy_sc  = np.zeros(n, dtype=np.int32)
-    sell_sc = np.zeros(n, dtype=np.int32)
-    for i in range(n):
-        bs = ss = 0
-        e9, e21, e50 = sd["ema9"][i], sd["ema21"][i], sd["ema50"][i]
-        if not any(math.isnan(v) for v in [e9, e21, e50]):
-            if e9  > e21: bs += 12
-            elif e9  < e21: ss += 12
-            if e21 > e50: bs += 13
-            elif e21 < e50: ss += 13
-        r = sd["rsi14"][i]
-        if not math.isnan(r):
-            if 40 <= r <= 65:  bs += 15
-            elif 35 <= r < 40: bs += 8
-            elif 65 < r <= 70: bs += 5
-            if 35 <= r <= 60:  ss += 15
-            elif 60 < r <= 65: ss += 8
-            elif 30 <= r < 35: ss += 5
-        mh, mhs = sd["macd_hist"][i], sd["macd_slope"][i]
-        if not any(math.isnan(v) for v in [mh, mhs]):
-            if mh  > 0: bs += 12
-            elif mh  < 0: ss += 12
-            if mhs > 0: bs += 8
-            elif mhs < 0: ss += 8
-        vr = sd["vol_ratio"][i]
-        if not math.isnan(vr):
-            pts = 10 if vr >= 1.5 else 6 if vr >= 1.0 else 3 if vr >= 0.7 else 0
-            bs += pts; ss += pts
-        av = sd["adx"][i]
-        if not math.isnan(av):
-            pts = 10 if av >= 25 else 6 if av >= 18 else 0
-            bs += pts; ss += pts
-        cl, vw = sd["close"][i], sd["vwap"][i]
-        if not any(math.isnan(v) for v in [cl, vw]):
-            if cl > vw:  bs += 10
-            elif cl < vw: ss += 10
-        sk, sd_ = sd["stoch_k"][i], sd["stoch_d"][i]
-        if not any(math.isnan(v) for v in [sk, sd_]):
-            if sk > sd_ and sk < 75: bs += 10
-            if sk < sd_ and sk > 25: ss += 10
-        buy_sc[i]  = min(bs, 100)
-        sell_sc[i] = min(ss, 100)
-    return buy_sc, sell_sc
 
-def prepare(sym: str, df: pd.DataFrame) -> dict:
-    df = compute_indicators(df)
-    ts_idx    = df.index.tolist()
-    ts_to_pos = {ts: i for i, ts in enumerate(ts_idx)}
-    cols = ["close","high","low","open","atr14","adx","bbw","bbw_q15",
-            "bb_upper","bb_lower","vol_ratio","ema9","ema21","ema50",
-            "macd_hist","macd_slope","rsi14","stoch_k","stoch_d","vwap",
-            "di_plus","di_minus","ema20_4h","ema50_4h","ema50d","ema200d"]
-    sd = {"name": sym, "ts_index": ts_idx, "ts_to_pos": ts_to_pos}
-    for col in cols:
-        sd[col] = df[col].values
-    n = len(ts_idx)
-    sd["buy_sc"], sd["sell_sc"] = _compute_scores(sd, n)
-    return sd
 
 # ── Pattern C (identique v33) ────────────────────────────────────────────────
-def check_pattern_c(sd: dict, bar: int, adx_val: float):
-    if bar < SQUEEZE_BARS_C + 3:
-        return None
-    try:
-        bbw_arr, bbwq_arr = sd["bbw"], sd["bbw_q15"]
-        bbw_cur, bbwq_cur = bbw_arr[bar], bbwq_arr[bar]
-        if math.isnan(bbw_cur) or math.isnan(bbwq_cur):
-            return None
-        for i in range(1, SQUEEZE_BARS_C + 1):
-            bw, bq = bbw_arr[bar - i], bbwq_arr[bar - i]
-            if math.isnan(bw) or math.isnan(bq) or bw >= bq:
-                return None
-        if bbw_cur <= bbwq_cur:
-            return None
-        adx_prev = sd["adx"][bar - 2]
-        if math.isnan(adx_val) or math.isnan(adx_prev):
-            return None
-        if adx_val <= adx_prev + 1.5 or adx_val < ADX_MIN_C:
-            return None
-        close    = sd["close"][bar]
-        bb_upper = sd["bb_upper"][bar]
-        bb_lower = sd["bb_lower"][bar]
-        vol_r    = sd["vol_ratio"][bar]
-        ema20_4h = sd["ema20_4h"][bar]
-        ema50_4h = sd["ema50_4h"][bar]
-        if any(math.isnan(v) for v in [close, bb_upper, bb_lower, vol_r, ema20_4h, ema50_4h]):
-            return None
-        if vol_r < VOL_RATIO_C:
-            return None
-        asset_4h_bull = ema20_4h > ema50_4h
-        if close > bb_upper and asset_4h_bull:
-            return "BUY"
-        if close < bb_lower and not asset_4h_bull:
-            return "SELL"
-    except Exception:
-        pass
-    return None
 
 # ── Pattern D — EMA Trend Follow ────────────────────────────────────────────
-def check_pattern_d(sd: dict, bar: int, adx_val: float):
-    """
-    Pattern D : EMA9 > EMA21 > EMA50 (haussier) ou inverse (baissier)
-                + RSI zone tendance + prix vs VWAP + alignement 4H.
-    Pas de filtre vol_ratio : trend follow ne nécessite pas de pic de volume.
-    RSI zones élargies pour capter les tendances matures sans sur-filtrer.
-    Fix backtest : ADX doit monter depuis 2 barres (tendance s'accélère).
-    """
-    if bar < 152:
-        return None
-    try:
-        e9, e21, e50 = sd["ema9"][bar], sd["ema21"][bar], sd["ema50"][bar]
-        if any(math.isnan(v) for v in [e9, e21, e50]):
-            return None
-        rsi = sd["rsi14"][bar]
-        if math.isnan(rsi):
-            return None
-        cl, vw = sd["close"][bar], sd["vwap"][bar]
-        if any(math.isnan(v) for v in [cl, vw]):
-            return None
-        ema20_4h = sd["ema20_4h"][bar]
-        ema50_4h = sd["ema50_4h"][bar]
-        if any(math.isnan(v) for v in [ema20_4h, ema50_4h]):
-            return None
-        # ADX doit monter depuis la barre precedente (1 barre suffit — audit 24/06 : +339% vs +249%)
-        adx_1 = sd["adx"][bar - 1]
-        if math.isnan(adx_1):
-            return None
-        if not (adx_val > adx_1):
-            return None
-        asset_4h_bull = ema20_4h > ema50_4h
-        if e9 > e21 > e50 and RSI_LONG_MIN_D <= rsi <= RSI_LONG_MAX_D and cl > vw and asset_4h_bull:
-            return "BUY"
-        if e9 < e21 < e50 and RSI_SHORT_MIN_D <= rsi <= RSI_SHORT_MAX_D and cl < vw and not asset_4h_bull:
-            return "SELL"
-    except Exception:
-        pass
-    return None
 
 # ── Pattern R — Mean Reversion ──────────────────────────────────────────────
-def check_pattern_r(sd: dict, bar: int) -> str | None:
-    """
-    Pattern R : mean reversion sur extrêmes Bollinger Bands en marché latéral.
-    Long  : prix dans les 25% bas des BB + RSI survendu + Stochastique survendu.
-    Short : prix dans les 25% hauts des BB + RSI suracheté + Stochastique suracheté.
-    N'utilise pas l'ADX (volontairement faible en régime range).
-    """
-    if bar < 30:
-        return None
-    try:
-        cl       = sd["close"][bar]
-        bb_upper = sd["bb_upper"][bar]
-        bb_lower = sd["bb_lower"][bar]
-        rsi      = sd["rsi14"][bar]
-        sk       = sd["stoch_k"][bar]
-        sd_val   = sd["stoch_d"][bar]
-        if any(math.isnan(v) for v in [cl, bb_upper, bb_lower, rsi, sk, sd_val]):
-            return None
-        bb_range = bb_upper - bb_lower
-        if bb_range <= 0:
-            return None
-        bb_pos = (cl - bb_lower) / bb_range   # 0 = bas, 1 = haut
-        # Long : 30% bas BB + RSI survendu + Stoch croisement haussier
-        # Conditions relâchées (diag : RSI<38 + sk<35 simultanés trop rares en range)
-        if bb_pos < 0.30 and rsi < 43 and sk < 43 and sk > sd_val:
-            return "BUY"
-        # Short : 30% hauts BB + RSI suracheté + Stoch croisement baissier
-        if bb_pos > 0.70 and rsi > 57 and sk > 57 and sk < sd_val:
-            return "SELL"
-    except Exception:
-        pass
-    return None
 
 # ── Pattern V — Volume Surge ─────────────────────────────────────────────────
-def check_pattern_v(sd: dict, bar: int) -> str | None:
-    """Volume Surge : vol 3x + BB extrême + score — hybride R/C indépendant du régime."""
-    if bar < 30:
-        return None
-    try:
-        cl       = float(sd["close"][bar])
-        vr       = float(sd["vol_ratio"][bar])
-        bb_upper = float(sd["bb_upper"][bar])
-        bb_lower = float(sd["bb_lower"][bar])
-        rsi      = float(sd["rsi14"][bar])
-        ema21    = float(sd["ema21"][bar])
-        if any(math.isnan(v) for v in [cl, vr, bb_upper, bb_lower, rsi, ema21]):
-            return None
-        if vr < VOL_MULT_V:
-            return None
-        bb_range = bb_upper - bb_lower
-        if bb_range <= 0:
-            return None
-        bb_pos = (cl - bb_lower) / bb_range
-        buy_sc  = int(sd["buy_sc"][bar])
-        sell_sc = int(sd["sell_sc"][bar])
-        if bb_pos < 0.35 and rsi < 50 and cl < ema21 and buy_sc >= SCORE_MIN_V:
-            return "BUY"
-        if bb_pos > 0.65 and rsi > 50 and cl > ema21 and sell_sc >= SCORE_MIN_V:
-            return "SELL"
-    except Exception:
-        pass
-    return None
 
 # ── Pattern MOM — Bull Pullback ─────────────────────────────────────────────
-def check_pattern_mom(sd: dict, bar: int, adx_val: float) -> str | None:
-    """Bull pullback: EMA9>21>50 + 4H bull (asset) + RSI 40-50 dip rebondissant
-    + close>EMA50. Filtre vol_ratio > VOL_RATIO_MOM : valide le rebond par le
-    volume (audit 08/07 : PF 0.84→2.40)."""
-    if bar < 60:
-        return None
-    try:
-        e9  = float(sd["ema9"][bar]);  e21 = float(sd["ema21"][bar]); e50 = float(sd["ema50"][bar])
-        rsi = float(sd["rsi14"][bar]); rsi1 = float(sd["rsi14"][bar - 1])
-        cl  = float(sd["close"][bar]); vol = float(sd["vol_ratio"][bar])
-        e20_4h = float(sd["ema20_4h"][bar]); e50_4h = float(sd["ema50_4h"][bar])
-        if any(math.isnan(v) for v in [e9, e21, e50, rsi, rsi1, cl, e20_4h, e50_4h, adx_val, vol]):
-            return None
-        if not (e9 > e21 > e50):                          return None  # structure EMA bull
-        if not (e20_4h > e50_4h):                         return None  # 4H asset bull
-        if not (RSI_MOM_MIN <= rsi <= RSI_MOM_MAX):       return None  # zone dip
-        if rsi <= rsi1:                                   return None  # rebond amorcé
-        if adx_val < ADX_MIN_MOM:                         return None  # trend actif
-        if cl < e50:                                      return None  # ne pas acheter sous support
-        if vol < VOL_RATIO_MOM:                           return None  # volume rebond requis
-        return "BUY"
-    except Exception:
-        pass
-    return None
 
 
 # ── Pattern S — Short Continuation Bear Trend ───────────────────────────────
-def check_pattern_s(sd: dict, bar: int, adx_val: float) -> str | None:
-    """Failed rally en bear macro : EMA9<21<50 + MACD<0 + RSI 45-65 déclinant + close<EMA21."""
-    if bar < 52:
-        return None
-    try:
-        e9  = float(sd["ema9"][bar]);  e21 = float(sd["ema21"][bar]); e50 = float(sd["ema50"][bar])
-        rsi = float(sd["rsi14"][bar]); rsi2 = float(sd["rsi14"][bar - 2])
-        mh  = float(sd["macd_hist"][bar])
-        cl  = float(sd["close"][bar])
-        if any(math.isnan(v) for v in [e9, e21, e50, rsi, rsi2, mh, cl, adx_val]):
-            return None
-        if not (e9 < e21 < e50):                   return None  # structure EMA entièrement baissière
-        if mh >= 0:                                 return None  # MACD momentum négatif
-        if not (RSI_S_MIN <= rsi <= RSI_S_MAX):    return None  # zone failed rally
-        if rsi >= rsi2:                             return None  # RSI doit décliner (rally raté)
-        if cl >= e21:                               return None  # rejeté sous résistance EMA21
-        if adx_val < ADX_MIN_S:                    return None  # trend actif
-        return "SELL"
-    except Exception:
-        pass
-    return None
 
 
 # ── Étape moteur (une barre) ─────────────────────────────────────────────────

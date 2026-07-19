@@ -27,7 +27,7 @@ SHARED_CONSTS = {
 
 errors = []
 
-for fname in ["backtest_v33.py"]:
+for fname in ["backtest_v33.py", "live_monitor_v33.py"]:
     tree = ast.parse((ROOT / fname).read_text(encoding="utf-8"))
     for node in tree.body:
         if isinstance(node, ast.FunctionDef) and node.name in SHARED_FUNCS:
@@ -41,15 +41,6 @@ for fname in ["backtest_v33.py"]:
     src = (ROOT / fname).read_text(encoding="utf-8")
     if "from prism.strategy import" not in src:
         errors.append(f"{fname} n'importe plus prism.strategy")
-
-# live_monitor_v33.py est actuellement autonome (post-incident 18/07, pas encore
-# re-migré sur prism.strategy) — vérifié séparément : compile + import seulement.
-lm_path = ROOT / "live_monitor_v33.py"
-if lm_path.exists():
-    try:
-        ast.parse(lm_path.read_text(encoding="utf-8"))
-    except SyntaxError as e:
-        errors.append(f"live_monitor_v33.py : erreur de syntaxe {e}")
 
 tree = ast.parse((ROOT / "prism" / "strategy.py").read_text(encoding="utf-8"))
 defined = {n.name for n in tree.body if isinstance(n, ast.FunctionDef)}
