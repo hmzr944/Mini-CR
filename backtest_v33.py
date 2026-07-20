@@ -700,39 +700,6 @@ def run_backtest(sym_data: dict, start_ts: pd.Timestamp, end_ts: pd.Timestamp,
             if len(open_positions) >= active_max_pos:
                 break
 
-            # ── Pattern MOM ──────────────────────────────────────────────────
-            if bull_macro and sym not in syms_in_pos:
-                mom_count = sum(1 for p in open_positions.values() if p.get("pattern") == "MOM")
-                if mom_count < MAX_POS_MOM:
-                    mk = sym + "MOM"
-                    if bar - cooldown_tracker.get(mk, -9999) >= COOLDOWN_BARS_MOM:
-                        if check_pattern_mom(sd, bar, adx_val) == "BUY" and not btc_24h_crash:
-                            score = int(sd["buy_sc"][bar])
-                            if score >= 65:
-                                entry_bar = bar + 1 if next_bar_entry else bar
-                                if entry_bar < len(sd["open"]):
-                                    open_px = float(sd["open"][entry_bar])
-                                    ep = open_px * (1 + SLIPPAGE)
-                                    atr = float(sd["atr14"][bar])
-                                    if math.isnan(atr) or atr <= 0:
-                                        atr = ep * 0.015
-                                    sl_pct = max(0.008, min(0.025, 1.3 * atr / (ep + 1e-10)))
-                                    tp_pct = sl_pct * RR_RATIO_MOM
-                                    sl, tp = ep * (1 - sl_pct), ep * (1 + tp_pct)
-                                    entry_ts = sd["ts_index"][entry_bar] if next_bar_entry else bar_ts
-                                    margin = equity * RISK_PCT_MOM * combined_scale
-                                    if total_margin_used + margin <= max_margin:
-                                        pk = mk + str(bar_ts)
-                                        open_positions[pk] = {
-                                            "sym": sym, "side": "long", "pattern": "MOM",
-                                            "entry_ts": entry_ts, "entry_price": ep,
-                                            "sl": sl, "tp": tp, "margin": margin,
-                                            "leverage": BASE_LEVERAGE_MOM, "score": score,
-                                        }
-                                        cooldown_tracker[mk] = bar
-                                        total_margin_used += margin
-                                        syms_in_pos.add(sym)
-
             # ── Pattern R (régime range uniquement) ─────────────────────────
             if ranging_regime and not r_paused and sym not in syms_in_pos and not survive_mode:
                 rk = sym + "R"
@@ -769,6 +736,71 @@ def run_backtest(sym_data: dict, start_ts: pd.Timestamp, end_ts: pd.Timestamp,
                                     cooldown_tracker[rk] = bar
                                     total_margin_used += margin
                                     syms_in_pos.add(sym)
+
+        # ── Pattern MOM — passe dédiée (collecte-tri-allocation) ───────────────
+        # BUG FIX 20/07/2026 : même défaut que C/D avant fix — ouvrait le 1er
+        # candidat rencontré, gates chaos_regime/market_panic_down/btc_1h_bias
+        # absents. MAX_POS_MOM=0 par défaut en backtest (dormant), mais corrigé
+        # pour cohérence dès qu'un script l'active (ex. tools/incubator.py).
+        if bull_macro and not chaos_regime and not survive_mode and MAX_POS_MOM > 0:
+            mom_count = sum(1 for p in open_positions.values() if p.get("pattern") == "MOM")
+            if mom_count < MAX_POS_MOM:
+                candidates_mom = []
+                for sym in SYMBOLS:
+                    if sym == "BTC-USDT" or sym in syms_in_pos:
+                        continue
+                    sd = sym_data.get(sym)
+                    if sd is None:
+                        continue
+                    bar = sd["ts_to_pos"].get(bar_ts)
+                    if bar is None or bar < 60:
+                        continue
+                    if bar - cooldown_tracker.get(sym + "MOM", -9999) < COOLDOWN_BARS_MOM:
+                        continue
+                    adx_val = float(sd["adx"][bar])
+                    if math.isnan(adx_val):
+                        continue
+                    if check_pattern_mom(sd, bar, adx_val) != "BUY":
+                        continue
+                    if market_panic_down or btc_1h_bias == "bear" or btc_24h_crash:
+                        continue
+                    score = int(sd["buy_sc"][bar])
+                    if score < SCORE_MIN_MOM:
+                        continue
+                    candidates_mom.append(dict(sym=sym, bar=bar, score=score))
+                candidates_mom.sort(key=lambda c: c["score"], reverse=True)
+                for c in candidates_mom[:MAX_POS_MOM - mom_count]:
+                    if len(open_positions) >= MAX_POS:
+                        break
+                    if total_margin_used + 1e-6 > max_margin:
+                        break
+                    sym, bar, score = c["sym"], c["bar"], c["score"]
+                    sd = sym_data[sym]
+                    entry_bar = bar + 1 if next_bar_entry else bar
+                    if entry_bar >= len(sd["open"]):
+                        continue
+                    open_px = float(sd["open"][entry_bar])
+                    ep = open_px * (1 + SLIPPAGE)
+                    atr = float(sd["atr14"][bar])
+                    if math.isnan(atr) or atr <= 0:
+                        atr = ep * 0.015
+                    sl_pct = max(0.008, min(0.025, 1.3 * atr / (ep + 1e-10)))
+                    tp_pct = sl_pct * RR_RATIO_MOM
+                    sl, tp = ep * (1 - sl_pct), ep * (1 + tp_pct)
+                    entry_ts = sd["ts_index"][entry_bar] if next_bar_entry else bar_ts
+                    margin = equity * RISK_PCT_MOM * combined_scale
+                    if total_margin_used + margin > max_margin:
+                        continue
+                    pk = sym + "MOM" + str(bar_ts)
+                    open_positions[pk] = {
+                        "sym": sym, "side": "long", "pattern": "MOM",
+                        "entry_ts": entry_ts, "entry_price": ep,
+                        "sl": sl, "tp": tp, "margin": margin,
+                        "leverage": BASE_LEVERAGE_MOM, "score": score,
+                    }
+                    cooldown_tracker[sym + "MOM"] = bar
+                    total_margin_used += margin
+                    syms_in_pos.add(sym)
 
         # ── Pattern S — passe dédiée, max 1 position/bar ──────────────────────
         # BUG FIX 19/07/2026 : reconstruction initiale ouvrait 1 position S PAR
