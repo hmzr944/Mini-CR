@@ -8,9 +8,16 @@ import argparse
 import csv
 import json
 import os
+import sys
 import time
 from pathlib import Path
 from datetime import datetime
+
+# BUG FIX 21/07/2026 : plantait immédiatement hors Docker sur Windows (console
+# cp1252 par défaut, incapable d'encoder "→"). Sans effet en prod (container
+# Docker = UTF-8 par défaut) mais bloquant pour tout test/lancement local.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 try:
     from flask import Flask, jsonify, send_file, Response, stream_with_context
