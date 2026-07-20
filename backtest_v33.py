@@ -102,6 +102,9 @@ PANIC_THRESH       = 0.80
 NEAR_ATH_THRESH    = 0.03
 BTC_BEAR_R_THRESH  = 0.12
 ADX_RANGE_MAX      = 22
+BTC_ADX_MIN_BEAR_D = 28  # BTC ADX minimum pour D shorts en bear_mode (trending bear seulement)
+BEAR_D_NONWL_SCORE_MIN = 92  # score minimum pour D non-whitelist en bear_mode
+MAX_BEAR_D_NONWL_POS   = 3   # max 3 shorts D non-whitelist simultanés (corrélation)
 
 SCORE_MIN_S     = 82
 S_MARGIN_CAP    = 600.0
@@ -361,9 +364,11 @@ def run_backtest(sym_data: dict, start_ts: pd.Timestamp, end_ts: pd.Timestamp,
         btc_bbw     = float(btc_sd["bbw"][b])
         btc_bbwq    = float(btc_sd["bbw_q15"][b])
 
+        # BUG FIX 20/07/2026 : seuil ADX bear_macro était 22, la vraie valeur
+        # (live_monitor_v33.py verbatim) est 20.
         bear_macro = (not math.isnan(btc_e20_4h) and not math.isnan(btc_e50_4h)
                       and not math.isnan(btc_adx)
-                      and btc_e20_4h < btc_e50_4h and btc_adx > 22)
+                      and btc_e20_4h < btc_e50_4h and btc_adx > 20)
         bull_macro = (not math.isnan(btc_e20_4h) and not math.isnan(btc_e50_4h)
                       and btc_e20_4h > btc_e50_4h)
 
@@ -395,10 +400,32 @@ def run_backtest(sym_data: dict, start_ts: pd.Timestamp, end_ts: pd.Timestamp,
                 elif m3h < -0.003:
                     btc_1h_bias = "bear"
 
+        # BUG FIX 20/07/2026 : ranging_regime utilisait bbw_q15 (15e percentile
+        # roulant 40 barres) au lieu de la vraie formule (médiane BBW 30j × 1.2
+        # de tolérance) — récupéré verbatim depuis live_monitor_v33.py.
         ranging_regime = False
-        if not math.isnan(btc_adx) and not math.isnan(btc_bbw) and not math.isnan(btc_bbwq):
-            if btc_adx < ADX_RANGE_MAX and btc_bbw <= btc_bbwq:
+        if not math.isnan(btc_adx) and not math.isnan(btc_bbw) and btc_adx < ADX_RANGE_MAX and b >= 30:
+            past_bbws = [float(btc_sd["bbw"][max(0, b - i)]) for i in range(1, 31)]
+            med_bbw = sorted(past_bbws)[15]
+            if btc_bbw <= med_bbw * 1.2:
                 ranging_regime = True
+
+        # BUG FIX 20/07/2026 : btc_4h_bull totalement absent — filtre directionnel
+        # sur momentum SOUTENU 24H+48H (distinct de bear_macro/bull_macro qui sont
+        # basés sur EMA). None = pas de filtre ; True bloque tous les SHORTS C/D ;
+        # False (déclenché uniquement sur crash confirmé) bloque tous les LONGS.
+        btc_4h_bull = None
+        if b >= 48:
+            cl_now = btc_close
+            cl_24h = float(btc_sd["close"][b - 24])
+            cl_48h = float(btc_sd["close"][b - 48])
+            if cl_24h > 0 and cl_48h > 0:
+                m24h = (cl_now - cl_24h) / cl_24h
+                m48h = (cl_now - cl_48h) / cl_48h
+                if m24h < -0.03 and m48h < -0.04:
+                    btc_4h_bull = False
+                elif m24h > 0.03 and m48h > 0.04:
+                    btc_4h_bull = True
 
         btc_near_ath   = False
         btc_bear_for_r = False
@@ -440,13 +467,27 @@ def run_backtest(sym_data: dict, start_ts: pd.Timestamp, end_ts: pd.Timestamp,
                 c_4h  = float(sd2["close"][b2 - 4])
                 if c_4h > 0 and not math.isnan(c_now):
                     moves.append((c_now - c_4h) / c_4h)
-            if moves:
+            if len(moves) >= 5:  # BUG FIX 20/07 : garde minimum absent (évite faux signal sur peu de données)
                 down = sum(1 for m in moves if m < -PANIC_VEL) / len(moves)
                 up   = sum(1 for m in moves if m > PANIC_VEL) / len(moves)
                 market_panic_down = down >= PANIC_THRESH
                 market_panic_up   = up >= PANIC_THRESH
 
-        score_min_c_eff = (SCORE_MIN - 3) if bull_macro else SCORE_MIN
+        # BUG FIX 20/07/2026 : le throttling survive_mode était TOTALEMENT absent.
+        # En survive_mode (BTC >12% sous pic 30j + sous EMA50_4H), le vrai bot
+        # réduit drastiquement risque/positions/exigences de score — récupéré
+        # verbatim depuis live_monitor_v33.py (bear_mode = survive_mode).
+        bear_mode = survive_mode
+        if bear_mode:
+            active_risk_pct = risk_pct_c * 0.30
+            active_max_pos  = 3
+            score_min_c_eff = SCORE_MIN + 15
+            active_score_d  = SCORE_MIN_D + 8
+        else:
+            active_risk_pct = risk_pct_c
+            active_max_pos  = MAX_POS
+            score_min_c_eff = (SCORE_MIN - 3) if bull_macro else SCORE_MIN
+            active_score_d  = SCORE_MIN_D
         max_margin = equity * MAX_MARGIN_RATIO
         total_margin_used = sum(p["margin"] for p in open_positions.values())
 
@@ -456,6 +497,193 @@ def run_backtest(sym_data: dict, start_ts: pd.Timestamp, end_ts: pd.Timestamp,
         micro_adj = 0
 
         syms_in_pos = {p["sym"] for p in open_positions.values()}
+
+        # BUG FIX 20/07/2026 : restructuration complète C+D. L'ancienne version
+        # ouvrait la 1ère position valide rencontrée en parcourant SYMBOLS dans
+        # l'ordre fixe (biais vers BTC/ETH/SOL...), sans comparer la qualité des
+        # signaux entre eux. Le vrai moteur (live_monitor_v33.py, verbatim)
+        # COLLECTE tous les candidats valides sur les 26 symboles, les TRIE par
+        # (score, ADX) décroissant, puis n'alloue les slots MAX_POS/marge qu'aux
+        # meilleurs. Explique une bonne part du surplus de trades ET du WR trop
+        # bas (des signaux médiocres passaient alors qu'un meilleur candidat
+        # était disponible la même barre).
+
+        # ── Pattern C — collecte ────────────────────────────────────────────
+        candidates_c = []
+        if not ranging_regime and not c_paused:
+            for sym in SYMBOLS:
+                if sym == "BTC-USDT" or sym in syms_in_pos:
+                    continue
+                if use_c_blacklist and sym in c_blacklist:
+                    continue
+                sd = sym_data.get(sym)
+                if sd is None:
+                    continue
+                bar = sd["ts_to_pos"].get(bar_ts)
+                if bar is None or bar < 152:
+                    continue
+                if bar - cooldown_tracker.get(sym + "C", -9999) < COOLDOWN_BARS:
+                    continue
+                adx_val = float(sd["adx"][bar])
+                if math.isnan(adx_val):
+                    continue
+                action = check_pattern_c(sd, bar, adx_val)
+                if action is None:
+                    continue
+                if btc_4h_bull is not None:
+                    if (action == "BUY" and not btc_4h_bull) or (action == "SELL" and btc_4h_bull):
+                        continue
+                if (btc_1h_bias == "bear" and action == "BUY") or (btc_1h_bias == "bull" and action == "SELL"):
+                    continue
+                if action == "BUY" and btc_24h_crash:
+                    continue
+                if bear_mode and action == "BUY":
+                    continue
+                if (market_panic_down and action == "BUY") or (market_panic_up and action == "SELL"):
+                    continue
+                if action == "SELL" and btc_near_ath:
+                    continue
+                score = int(sd["buy_sc"][bar]) if action == "BUY" else int(sd["sell_sc"][bar])
+                if score < score_min_c_eff:
+                    continue
+                candidates_c.append(dict(sym=sym, bar=bar, action=action, score=score, adx=adx_val))
+
+        candidates_c.sort(key=lambda c: (c["score"], c["adx"]), reverse=True)
+        for c in candidates_c:
+            if len(open_positions) >= active_max_pos:
+                break
+            if total_margin_used + 1e-6 > max_margin:
+                break
+            sym, bar, action, score = c["sym"], c["bar"], c["action"], c["score"]
+            sd = sym_data[sym]
+            side = "long" if action == "BUY" else "short"
+            entry_bar = bar + 1 if next_bar_entry else bar
+            if entry_bar >= len(sd["open"]):
+                continue
+            open_px = float(sd["open"][entry_bar])
+            ep = open_px * (1 + SLIPPAGE) if side == "long" else open_px * (1 - SLIPPAGE)
+            atr = float(sd["atr14"][bar])
+            if math.isnan(atr) or atr <= 0:
+                atr = ep * 0.015
+            sl_pct = max(ATR_SL_MIN_C, min(ATR_SL_MAX_C, ATR_SL_MULT * atr / (ep + 1e-10)))
+            tp_pct = sl_pct * RR_RATIO
+            sl = ep * (1 - sl_pct) if side == "long" else ep * (1 + sl_pct)
+            tp = ep * (1 + tp_pct) if side == "long" else ep * (1 - tp_pct)
+            entry_ts = sd["ts_index"][entry_bar] if next_bar_entry else bar_ts
+            mult = score_mult_fn(score, "C")
+            lev  = HIGH_LEVERAGE if (bull_macro and score >= BULL_LEV_SCORE) else BASE_LEVERAGE
+            margin = equity * active_risk_pct * combined_scale * mult
+            if total_margin_used + margin > max_margin:
+                continue
+            pk = sym + "C" + str(bar_ts)
+            open_positions[pk] = {
+                "sym": sym, "side": side, "pattern": "C",
+                "entry_ts": entry_ts, "entry_price": ep,
+                "sl": sl, "tp": tp, "margin": margin,
+                "leverage": lev, "score": score,
+            }
+            cooldown_tracker[sym + "C"] = bar
+            total_margin_used += margin
+            syms_in_pos.add(sym)
+
+        # ── Pattern D — collecte ────────────────────────────────────────────
+        candidates_d = []
+        if not ranging_regime and not no_btc_d:
+            d_universe_restricted = not bear_mode and not bear_macro
+            for sym in SYMBOLS:
+                if sym == "BTC-USDT" or sym in syms_in_pos:
+                    continue
+                if d_universe_restricted and sym not in (PATTERN_D_WHITELIST | PATTERN_D_BULL_EXTRA):
+                    continue
+                sd = sym_data.get(sym)
+                if sd is None:
+                    continue
+                bar = sd["ts_to_pos"].get(bar_ts)
+                if bar is None or bar < 152:
+                    continue
+                if bar - cooldown_tracker.get(sym + "D", -9999) < COOLDOWN_BARS:
+                    continue
+                adx_val = float(sd["adx"][bar])
+                if math.isnan(adx_val) or adx_val < adx_min_d:
+                    continue
+                action = check_pattern_d(sd, bar, adx_val)
+                if action is None:
+                    continue
+                if bear_macro and action == "BUY":
+                    continue
+                if btc_4h_bull is not None:
+                    if (action == "BUY" and not btc_4h_bull) or (action == "SELL" and btc_4h_bull):
+                        continue
+                if (btc_1h_bias == "bear" and action == "BUY") or (btc_1h_bias == "bull" and action == "SELL"):
+                    continue
+                if action == "BUY" and btc_24h_crash:
+                    continue
+                if bear_mode and action == "BUY":
+                    continue
+                if action == "SELL" and bear_mode and btc_adx < BTC_ADX_MIN_BEAR_D:
+                    continue
+                if (market_panic_down and action == "BUY") or (market_panic_up and action == "SELL"):
+                    continue
+                if action == "SELL" and btc_near_ath:
+                    continue
+                score = int(sd["buy_sc"][bar]) if action == "BUY" else int(sd["sell_sc"][bar])
+                if score < active_score_d:
+                    continue
+                # BUG FIX 20/07/2026 : score plus strict pour D non-whitelist en
+                # bear_mode — constante définie mais jamais appliquée.
+                if (bear_mode and action == "SELL" and sym not in PATTERN_D_WHITELIST
+                        and score < BEAR_D_NONWL_SCORE_MIN):
+                    continue
+                candidates_d.append(dict(sym=sym, bar=bar, action=action, score=score, adx=adx_val))
+
+        candidates_d.sort(key=lambda c: (c["score"], c["adx"]), reverse=True)
+        # BUG FIX 20/07/2026 : garde corrélation — max MAX_BEAR_D_NONWL_POS shorts
+        # D non-whitelist simultanés en bear_mode — jamais appliquée non plus.
+        bear_nonwl_d_count = sum(
+            1 for p in open_positions.values()
+            if p.get("pattern") == "D" and p.get("side") == "short"
+            and p.get("sym") not in PATTERN_D_WHITELIST)
+        for c in candidates_d:
+            if len(open_positions) >= active_max_pos:
+                break
+            if total_margin_used + 1e-6 > max_margin:
+                break
+            sym, bar, action, score = c["sym"], c["bar"], c["action"], c["score"]
+            sd = sym_data[sym]
+            side = "long" if action == "BUY" else "short"
+            if (side == "short" and bear_mode and sym not in PATTERN_D_WHITELIST
+                    and bear_nonwl_d_count >= MAX_BEAR_D_NONWL_POS):
+                continue
+            entry_bar = bar + 1 if next_bar_entry else bar
+            if entry_bar >= len(sd["open"]):
+                continue
+            open_px = float(sd["open"][entry_bar])
+            ep = open_px * (1 + SLIPPAGE) if side == "long" else open_px * (1 - SLIPPAGE)
+            atr = float(sd["atr14"][bar])
+            if math.isnan(atr) or atr <= 0:
+                atr = ep * 0.015
+            sl_pct = max(ATR_SL_MIN_C, min(ATR_SL_MAX_C, ATR_SL_MULT * atr / (ep + 1e-10)))
+            tp_pct = sl_pct * RR_RATIO
+            sl = ep * (1 - sl_pct) if side == "long" else ep * (1 + sl_pct)
+            tp = ep * (1 + tp_pct) if side == "long" else ep * (1 - tp_pct)
+            entry_ts = sd["ts_index"][entry_bar] if next_bar_entry else bar_ts
+            mult = score_mult_fn(score, "D")
+            lev  = HIGH_LEVERAGE_D if score >= 92 else BASE_LEVERAGE_D
+            margin = equity * RISK_PCT_D * combined_scale * mult
+            if total_margin_used + margin > max_margin:
+                continue
+            pk = sym + "D" + str(bar_ts)
+            open_positions[pk] = {
+                "sym": sym, "side": side, "pattern": "D",
+                "entry_ts": entry_ts, "entry_price": ep,
+                "sl": sl, "tp": tp, "margin": margin,
+                "leverage": lev, "score": score,
+            }
+            cooldown_tracker[sym + "D"] = bar
+            total_margin_used += margin
+            syms_in_pos.add(sym)
+            if side == "short" and sym not in PATTERN_D_WHITELIST:
+                bear_nonwl_d_count += 1
 
         for sym in SYMBOLS:
             if sym == "BTC-USDT":
@@ -469,94 +697,8 @@ def run_backtest(sym_data: dict, start_ts: pd.Timestamp, end_ts: pd.Timestamp,
             adx_val = float(sd["adx"][bar])
             if math.isnan(adx_val):
                 continue
-            if len(open_positions) >= MAX_POS:
+            if len(open_positions) >= active_max_pos:
                 break
-
-            # ── Pattern C ────────────────────────────────────────────────────
-            if (not ranging_regime and not c_paused and sym not in syms_in_pos
-                    and (not use_c_blacklist or sym not in c_blacklist)):
-                ck = sym + "C"
-                if bar - cooldown_tracker.get(ck, -9999) >= COOLDOWN_BARS:
-                    action = check_pattern_c(sd, bar, adx_val)
-                    if (btc_1h_bias == "bear" and action == "BUY") or (btc_1h_bias == "bull" and action == "SELL"):
-                        action = None
-                    if (market_panic_down and action == "BUY") or (market_panic_up and action == "SELL"):
-                        action = None
-                    if action is not None and not btc_24h_crash:
-                        score = int(sd["buy_sc"][bar]) if action == "BUY" else int(sd["sell_sc"][bar])
-                        if action == "SELL" and btc_near_ath:
-                            pass
-                        elif score >= score_min_c_eff and total_margin_used + 1e-6 <= max_margin:
-                            side = "long" if action == "BUY" else "short"
-                            entry_bar = bar + 1 if next_bar_entry else bar
-                            if entry_bar < len(sd["open"]):
-                                open_px = float(sd["open"][entry_bar])
-                                ep = open_px * (1 + SLIPPAGE) if side == "long" else open_px * (1 - SLIPPAGE)
-                                atr = float(sd["atr14"][bar])
-                                if math.isnan(atr) or atr <= 0:
-                                    atr = ep * 0.015
-                                sl_pct = max(ATR_SL_MIN_C, min(ATR_SL_MAX_C, ATR_SL_MULT * atr / (ep + 1e-10)))
-                                tp_pct = sl_pct * RR_RATIO
-                                sl = ep * (1 - sl_pct) if side == "long" else ep * (1 + sl_pct)
-                                tp = ep * (1 + tp_pct) if side == "long" else ep * (1 - tp_pct)
-                                entry_ts = sd["ts_index"][entry_bar] if next_bar_entry else bar_ts
-                                mult = score_mult_fn(score, "C")
-                                lev  = HIGH_LEVERAGE if (bull_macro and score >= BULL_LEV_SCORE) else BASE_LEVERAGE
-                                margin = equity * risk_pct_c * combined_scale * mult
-                                if total_margin_used + margin <= max_margin:
-                                    pk = ck + str(bar_ts)
-                                    open_positions[pk] = {
-                                        "sym": sym, "side": side, "pattern": "C",
-                                        "entry_ts": entry_ts, "entry_price": ep,
-                                        "sl": sl, "tp": tp, "margin": margin,
-                                        "leverage": lev, "score": score,
-                                    }
-                                    cooldown_tracker[ck] = bar
-                                    total_margin_used += margin
-                                    syms_in_pos.add(sym)
-
-            # ── Pattern D ────────────────────────────────────────────────────
-            if sym not in syms_in_pos:
-                elig_d = (sym in PATTERN_D_WHITELIST or
-                          (bull_macro and sym in PATTERN_D_BULL_EXTRA))
-                if elig_d and not no_btc_d:
-                    dk = sym + "D"
-                    if bar - cooldown_tracker.get(dk, -9999) >= COOLDOWN_BARS:
-                        action = check_pattern_d(sd, bar, adx_val)
-                        if (btc_1h_bias == "bear" and action == "BUY") or (btc_1h_bias == "bull" and action == "SELL"):
-                            action = None
-                        if (market_panic_down and action == "BUY") or (market_panic_up and action == "SELL"):
-                            action = None
-                        if action is not None and adx_val >= adx_min_d and not btc_24h_crash:
-                            score = int(sd["buy_sc"][bar]) if action == "BUY" else int(sd["sell_sc"][bar])
-                            if not (action == "SELL" and btc_near_ath) and score >= score_min_d:
-                                side = "long" if action == "BUY" else "short"
-                                entry_bar = bar + 1 if next_bar_entry else bar
-                                if entry_bar < len(sd["open"]):
-                                    open_px = float(sd["open"][entry_bar])
-                                    ep = open_px * (1 + SLIPPAGE) if side == "long" else open_px * (1 - SLIPPAGE)
-                                    atr = float(sd["atr14"][bar])
-                                    if math.isnan(atr) or atr <= 0:
-                                        atr = ep * 0.015
-                                    sl_pct = max(ATR_SL_MIN_C, min(ATR_SL_MAX_C, ATR_SL_MULT * atr / (ep + 1e-10)))
-                                    tp_pct = sl_pct * RR_RATIO
-                                    sl = ep * (1 - sl_pct) if side == "long" else ep * (1 + sl_pct)
-                                    tp = ep * (1 + tp_pct) if side == "long" else ep * (1 - tp_pct)
-                                    entry_ts = sd["ts_index"][entry_bar] if next_bar_entry else bar_ts
-                                    mult = score_mult_fn(score, "D")
-                                    lev  = HIGH_LEVERAGE_D if score >= 92 else BASE_LEVERAGE_D
-                                    margin = equity * RISK_PCT_D * combined_scale * mult
-                                    if total_margin_used + margin <= max_margin:
-                                        pk = dk + str(bar_ts)
-                                        open_positions[pk] = {
-                                            "sym": sym, "side": side, "pattern": "D",
-                                            "entry_ts": entry_ts, "entry_price": ep,
-                                            "sl": sl, "tp": tp, "margin": margin,
-                                            "leverage": lev, "score": score,
-                                        }
-                                        cooldown_tracker[dk] = bar
-                                        total_margin_used += margin
-                                        syms_in_pos.add(sym)
 
             # ── Pattern MOM ──────────────────────────────────────────────────
             if bull_macro and sym not in syms_in_pos:
