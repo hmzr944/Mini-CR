@@ -974,6 +974,7 @@ def engine_step(state: dict, sym_data: dict, current_bar_ts: pd.Timestamp):
 
     # Pas d'entrée en session asiatique 00h-07h UTC (WR 19% sur backtest 4 mois)
     if current_bar_ts.hour < 7:
+        log.debug(f"SESSION ASIATIQUE ({current_bar_ts.hour}h UTC) — scan écourté, pas d'entrée possible")
         return trades_closed, signals_new
     if skip_entries:
         log.info(f"  skip_entries=True (day_pnl={day_pnl_pct:.1%})")
@@ -1008,8 +1009,8 @@ def engine_step(state: dict, sym_data: dict, current_bar_ts: pd.Timestamp):
                     # Bull soutenu : +3%/24H confirmé +4%/48H → SHORTS interdits
                     btc_4h_bull = True
                     log.info(f"DIR-FILTER BULL: BTC 24H={_m24h*100:+.1f}% 48H={_m48h*100:+.1f}% → shorts bloqués")
-        except Exception:
-            pass
+        except Exception as _e:
+            log.debug(f"DIR-FILTER indisponible ({_e}) — btc_4h_bull inchangé")
 
     # BTC 1H alignment : micro-trend BTC sur les 3 dernières heures
     # "bull" → +0.3%/3H → SHORTS interdits  |  "bear" → -0.3%/3H → LONGS interdits
@@ -1028,8 +1029,8 @@ def engine_step(state: dict, sym_data: dict, current_bar_ts: pd.Timestamp):
                     elif _m3h < -0.003:
                         btc_1h_bias = "bear"
                         log.info(f"BTC-1H-BIAS BEAR: {_m3h*100:.2f}% sur 3H → longs bloqués")
-        except Exception:
-            pass
+        except Exception as _e:
+            log.debug(f"BTC-1H-BIAS indisponible ({_e}) — btc_1h_bias inchangé")
 
     # ── 4c. Détection régime marché ───────────────────────────────────────────
     # CHAOS  : ATR BTC > 2× médiane → volatilité extrême → tout bloquer
@@ -1096,8 +1097,8 @@ def engine_step(state: dict, sym_data: dict, current_bar_ts: pd.Timestamp):
                     f"RÉGIME BULL MACRO: BTC EMA20_4H={btc_e20_4h:.0f} > EMA50_4H={btc_e50_4h:.0f} "
                     f"— Pattern MOM actif, score C/D relâché de 3pts"
                 )
-        except Exception:
-            pass
+        except Exception as _e:
+            log.debug(f"Détection régime (chaos/range/bear/bull macro) indisponible ({_e}) — régime neutre par défaut")
 
     # BTC 24H crash guard
     btc_24h_crash = btc_mom_24h < BTC_CRASH_THRESH if btc_mom_24h != 0.0 else False
