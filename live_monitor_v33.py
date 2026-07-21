@@ -279,7 +279,9 @@ RISK_PCT_MOM      = 0.08     # 8% du capital (Kelly 11.2% → demi-Kelly conserv
 BASE_LEVERAGE_MOM = 8
 RR_RATIO_MOM      = 3.0      # RR plus court que C/D : pullback = mouvement cible limité
 COOLDOWN_BARS_MOM = 12
-MAX_POS_MOM       = 2        # max 2 positions MOM simultanées
+MAX_POS_MOM       = 0        # DÉSACTIVÉ 21/07 : 0% WR sur 10/10 trades live-realistic (avr-juil),
+                              # seuil de validation "10 premiers trades" du 08/07 atteint, négatif.
+                              # Aligné sur backtest_v33.py (déjà à 0 par défaut).
 
 # ── Optimisations performance (ajout v33.1) ─────────────────────────────────
 BEAR_MARGIN_SCALE = 0.50   # marge ×0.50 en survive_mode (bear) : risque réduit, shorts autorisés
