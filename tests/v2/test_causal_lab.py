@@ -453,3 +453,21 @@ class TestVerdictDistinguishesAbsenceFromIgnorance(unittest.TestCase):
         from prism_v2.research.validation import Condition as C, Verdict
         ps = self._standard(**{C.CAPACITY: False})
         self.assertIs(ps.verdict(), Verdict.EDGE_NOT_EXECUTABLE)
+
+
+class TestCapacityIsProbedNotAssumed(unittest.TestCase):
+
+    def test_grid_spans_small_to_large(self):
+        from prism_v2.experiment import CAPACITY_GRID_USD
+        self.assertLessEqual(CAPACITY_GRID_USD[0], 25.0)
+        self.assertGreaterEqual(CAPACITY_GRID_USD[-1], 5_000.0)
+        self.assertEqual(list(CAPACITY_GRID_USD), sorted(CAPACITY_GRID_USD))
+
+    def test_unmeasurable_impact_is_reported_not_extrapolated(self):
+        """Une taille que le carnet enregistre n'absorbe pas donne un impact
+        UNKNOWN : la ligne le DIT, elle n'extrapole pas."""
+        from prism_v2.experiment import capacity_curve_for
+        import inspect
+        src = inspect.getsource(capacity_curve_for)
+        self.assertIn("unmeasurable_share", src)
+        self.assertIn("jamais extrapolee", src)

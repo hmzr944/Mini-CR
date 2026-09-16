@@ -256,6 +256,41 @@ def run_config(spec: InstrumentSpec, series: SnapshotSeries, lo: int, hi: int,
 
 
 
+#: Grille de notionnels sondee. Elle doit descendre assez bas pour que le
+#: carnet absorbe tout, et monter assez haut pour que l'impact morde.
+CAPACITY_GRID_USD = (10.0, 25.0, 50.0, 100.0, 250.0, 500.0, 1_000.0,
+                     2_500.0, 5_000.0, 10_000.0)
+
+
+def capacity_curve_for(spec: InstrumentSpec, series: SnapshotSeries,
+                       lo: int, hi: int, lookback_ms: int, horizon_ms: int,
+                       threshold_spreads: float, latency_ms: int, bet: str,
+                       grid: Sequence[float] = CAPACITY_GRID_USD
+                       ) -> List[Dict[str, Any]]:
+    """Net moyen en fonction de la taille, sur la MEME serie d'evenements.
+
+    Repond a « a partir de quelle taille augmenter detruit le resultat ? ».
+    Un notionnel que le carnet enregistre n'absorbe pas donne un impact
+    UNKNOWN : la ligne est marquee non mesurable, jamais extrapolee.
+    """
+    rows: List[Dict[str, Any]] = []
+    for notional in grid:
+        r = run_config(spec, series, lo, hi, lookback_ms, horizon_ms,
+                       threshold_spreads, "CAPACITY", latency_ms,
+                       notional_usd=notional, bet=bet)
+        st = _stats(r.net_bps)
+        rows.append({
+            "notional_usd": notional, "n_resolved": r.n_resolved,
+            "n_events": r.n_events, "mean_net_bps": st["mean"],
+            "stderr": st["stderr"],
+            "unmeasurable_share": (
+                r.refusals.get("impact UNKNOWN (profondeur epuisee)", 0)
+                / r.n_events) if r.n_events else None,
+            "mean_gross_bps": _stats(r.gross_bps)["mean"],
+        })
+    return rows
+
+
 # ══════════════════════════════════════════════════════════════════════════
 def _stats(xs: Sequence[float]) -> Dict[str, Any]:
     n = len(xs)
@@ -658,6 +693,39 @@ def run(obs_path: Path, latency_ms: int = DEFAULT_LATENCY_MS,
     report["regimes"] = reg
     report["decay"] = dec
 
+    # ── 7ter. CAPACITE ────────────────────────────────────────────────────
+    print(); print("=" * 84); print("7ter. CAPACITE (net en fonction de la taille)")
+    print("=" * 84)
+    cap_rows: List[Dict[str, Any]] = []
+    cap_ref = selected or (ranked[0] if ranked else None)
+    if cap_ref is not None and cap_ref.inst_id in seriess:
+        cap_rows = capacity_curve_for(
+            specs_by_id[cap_ref.inst_id], seriess[cap_ref.inst_id],
+            disc_lo, disc_hi, cap_ref.lookback_ms, cap_ref.horizon_ms,
+            cap_ref.threshold_spreads, latency_ms, cap_ref.bet)
+        print(f"configuration sondee : {cap_ref.key}")
+        print(f"{'notionnel $':>12}{'N':>7}{'brut_bps':>11}{'net_bps':>11}"
+              f"{'non mesurable':>15}")
+        print("-" * 58)
+        for row in cap_rows:
+            net = ("n/a" if row["mean_net_bps"] is None
+                   else f"{row['mean_net_bps']:.3f}")
+            gross = ("n/a" if row["mean_gross_bps"] is None
+                     else f"{row['mean_gross_bps']:+.3f}")
+            um = ("n/a" if row["unmeasurable_share"] is None
+                  else f"{row['unmeasurable_share']:.0%}")
+            print(f"{row['notional_usd']:>12,.0f}{row['n_resolved']:>7}"
+                  f"{gross:>11}{net:>11}{um:>15}")
+        positives = [r for r in cap_rows
+                     if r["mean_net_bps"] is not None and r["mean_net_bps"] > 0]
+        print("\ncapacite a net positif : "
+              + (f"jusqu'a ${max(r['notional_usd'] for r in positives):,.0f}"
+                 if positives else "AUCUNE taille ne donne un net positif"))
+    else:
+        print("aucune configuration de reference : capacite non sondee")
+    report["capacity"] = {"rows": cap_rows,
+                          "reference": cap_ref.key if cap_ref else None}
+
     # ── 8. ENTONNOIR : OU MEURT L'EDGE ────────────────────────────────────
     print(); print("=" * 84); print("8. OU MEURT L'EDGE"); print("=" * 84)
     n_gross_pos = sum(1 for r in discovery.values() for g in r.gross_bps if g > 0)
@@ -721,9 +789,16 @@ def run(obs_path: Path, latency_ms: int = DEFAULT_LATENCY_MS,
     ps.assess(Condition.TEMPORAL_STABILITY, bool(val_ok),
               "positif en DEVELOPMENT et en VALIDATION" if val_ok
               else "non confirme sur un second segment")
-    ps.assess(Condition.CAPACITY, None,
-              f"non mesuree : l'observatoire n'enregistre que "
-              f"{meta.get('depth_levels')} niveaux ; au-dela l'impact est UNKNOWN")
+    cap_ok = any(r["mean_net_bps"] is not None and r["mean_net_bps"] > 0
+                 for r in cap_rows)
+    ps.assess(Condition.CAPACITY, cap_ok,
+              (f"sondee sur {len(cap_rows)} tailles de "
+               f"${CAPACITY_GRID_USD[0]:,.0f} a ${CAPACITY_GRID_USD[-1]:,.0f} ; "
+               + ("au moins une taille donne un net positif" if cap_ok
+                  else "aucune taille ne donne un net positif")
+               + f" (profondeur enregistree : {meta.get('depth_levels')} niveaux, "
+                 "au-dela l'impact est UNKNOWN)")
+              if cap_rows else "non sondee : aucune configuration de reference")
     ps.assess(Condition.RISK_MEASURED, bool(selected and len(selected.net_bps) > 1),
               "dispersion des resultats par evenement disponible" if selected
               else "aucun echantillon")
