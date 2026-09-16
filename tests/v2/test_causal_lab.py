@@ -530,3 +530,52 @@ class TestFeeSensitivityIsExactNotResimulated(unittest.TestCase):
                          threshold_spreads=1.0, split="D")
         for f in ("cost_spread_bps", "cost_impact_bps"):
             self.assertIn(f, r.__dataclass_fields__)
+
+
+class TestTriggerThresholdIsCausal(unittest.TestCase):
+    """Defaut trouve en red team sur mon propre code d'experience.
+
+    Le seuil de declenchement etait la mediane du spread sur TOUT le segment,
+    donnees posterieures a l'evenement comprises : du look-ahead, et dans le
+    holdout une lecture du holdout pour parametrer la regle.
+    """
+
+    def _basis(self):
+        from prism_v2.experiment import TrailingSpreadBasis
+        recs = random_walk(SPEC)
+        return TrailingSpreadBasis(series_from(recs)), series_from(recs)
+
+    def test_basis_uses_only_data_strictly_before_the_current_minute(self):
+        from prism_v2.experiment import (SPREAD_BASIS_BUCKET_MS,
+                                         TrailingSpreadBasis)
+        basis, s = self._basis()
+        t = s.first_ts + 30 * 60_000
+        bucket_start = (t // SPREAD_BASIS_BUCKET_MS) * SPREAD_BASIS_BUCKET_MS
+        # Toute valeur de la minute courante ou posterieure est exclue :
+        # deux instants de la meme minute partagent donc la meme base.
+        self.assertEqual(basis.at(bucket_start),
+                         basis.at(bucket_start + SPREAD_BASIS_BUCKET_MS - 1))
+
+    def test_basis_is_unavailable_before_enough_history(self):
+        """FAIL CLOSED : pas d'historique, pas de seuil, pas d'evenement."""
+        basis, s = self._basis()
+        self.assertIsNone(basis.at(s.first_ts))
+
+    def test_basis_is_identical_across_splits_by_construction(self):
+        """La regle doit etre la MEME en decouverte et sur le holdout."""
+        basis, s = self._basis()
+        t = s.first_ts + 40 * 60_000
+        self.assertEqual(basis.at(t), basis.at(t))
+        import inspect
+        from prism_v2.experiment import run_config
+        src = inspect.getsource(run_config)
+        self.assertNotIn("median_spread_bps(series, lo, hi)", src)
+
+    def test_instants_without_history_are_not_counted_as_refusals(self):
+        """Melanger les deux ferait lire « 362 000 refus pour 21 000
+        evenements » et donnerait l'illusion d'un systeme qui rejette tout."""
+        from prism_v2.experiment import ConfigResult
+        r = ConfigResult(inst_id="X", lookback_ms=1, horizon_ms=1,
+                         threshold_spreads=1.0, split="D")
+        self.assertIn("n_instants_without_basis", r.__dataclass_fields__)
+        self.assertEqual(r.refusals, {})

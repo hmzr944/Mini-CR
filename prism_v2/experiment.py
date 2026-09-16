@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from bisect import bisect_left
 import sys
 import time
 from dataclasses import dataclass, field
@@ -135,6 +136,9 @@ class ConfigResult:
     #: poste (frais) sans reexecuter la mesure.
     cost_spread_bps: List[float] = field(default_factory=list)
     cost_impact_bps: List[float] = field(default_factory=list)
+    #: Instants ou aucun evenement n'a pu etre evalue faute d'historique de
+    #: spread. Distinct d'un refus : rien n'a ete rejete, rien n'a ete teste.
+    n_instants_without_basis: int = 0
     refusals: Dict[str, int] = field(default_factory=dict)
 
     @property
@@ -153,28 +157,69 @@ class ConfigResult:
             "mean_net_bps": self.mean(self.net_bps),
             "mean_capture_fraction": self.mean(self.fractions),
             "sharpe": sharpe_ratio(self.net_bps) if len(self.net_bps) > 1 else None,
+            "n_instants_without_basis": self.n_instants_without_basis,
             "refusals": dict(sorted(self.refusals.items(), key=lambda kv: -kv[1])),
         }
 
 
-def median_spread_bps(series: SnapshotSeries, lo: int, hi: int) -> Optional[float]:
-    vals = []
-    for rec in series._recs:
-        if lo <= rec["ts"] < hi:
-            s = series.spread_bps(rec)
-            if s is not None and s > 0:
-                vals.append(s)
-    if not vals:
-        return None
-    vals.sort()
-    return vals[len(vals) // 2]
+#: Fenetre glissante servant de base au seuil de declenchement.
+SPREAD_BASIS_WINDOW_MS = 10 * 60_000
+
+#: Granularite du cache de la base. Une valeur par minute ECOULEE : la base
+#: utilisee a l'instant t provient donc strictement du passe.
+SPREAD_BASIS_BUCKET_MS = 60_000
+
+
+class TrailingSpreadBasis:
+    """Mediane du spread sur une fenetre glissante STRICTEMENT anterieure.
+
+    DEFAUT CORRIGE. La version precedente calculait la mediane sur TOUT le
+    segment, donnees posterieures a l'evenement comprises. C'etait du
+    look-ahead : le seuil de declenchement a l'instant t connaissait les
+    spreads de t+1 a la fin du segment. Dans le holdout, c'etait de surcroit
+    une lecture du holdout pour parametrer la regle.
+
+    Ici la base a l'instant t est la mediane des spreads observes sur les
+    `window_ms` precedant la DERNIERE MINUTE ECOULEE. Elle est donc
+    calculable en direct, et identique en decouverte, en validation et sur le
+    holdout — la regle est la meme partout.
+    """
+
+    def __init__(self, series: SnapshotSeries,
+                 window_ms: int = SPREAD_BASIS_WINDOW_MS,
+                 bucket_ms: int = SPREAD_BASIS_BUCKET_MS):
+        self.window_ms = window_ms
+        self.bucket_ms = bucket_ms
+        self._ts: List[int] = []
+        self._spreads: List[float] = []
+        for rec in series._recs:
+            sp = series.spread_bps(rec)
+            if sp is not None and sp > 0:
+                self._ts.append(rec["ts"])
+                self._spreads.append(sp)
+        self._cache: Dict[int, Optional[float]] = {}
+
+    def at(self, ts_ms: int) -> Optional[float]:
+        """Base utilisable a l'instant `ts_ms`, calculee sur le passe seul."""
+        bucket = ts_ms // self.bucket_ms
+        if bucket in self._cache:
+            return self._cache[bucket]
+        end = bucket * self.bucket_ms          # debut de la minute courante
+        start = end - self.window_ms
+        i = bisect_left(self._ts, start)
+        j = bisect_left(self._ts, end)
+        vals = sorted(self._spreads[i:j])
+        out = vals[len(vals) // 2] if vals else None
+        self._cache[bucket] = out
+        return out
 
 
 def run_config(spec: InstrumentSpec, series: SnapshotSeries, lo: int, hi: int,
                lookback_ms: int, horizon_ms: int, threshold_spreads: float,
                split: str, latency_ms: int,
                notional_usd: float = PROBE_NOTIONAL_USD,
-               bet: str = BET_REVERSION) -> ConfigResult:
+               bet: str = BET_REVERSION,
+               spread_basis: Optional["TrailingSpreadBasis"] = None) -> ConfigResult:
     """Balaye un segment, declenche AU FRANCHISSEMENT, mesure net de couts.
 
     Le declenchement se fait au franchissement du seuil, PAS sur une grille
@@ -185,11 +230,7 @@ def run_config(spec: InstrumentSpec, series: SnapshotSeries, lo: int, hi: int,
     res = ConfigResult(inst_id=spec.inst_id, lookback_ms=lookback_ms,
                        horizon_ms=horizon_ms, threshold_spreads=threshold_spreads,
                        split=split, bet=bet)
-    med_spread = median_spread_bps(series, lo, hi)
-    if med_spread is None:
-        res.refusals["spread median inconnu"] = 1
-        return res
-    threshold_bps = med_spread * threshold_spreads
+    basis = spread_basis if spread_basis is not None else TrailingSpreadBasis(series)
 
     last_event_ts = -10**18
     # Anti-chevauchement : deux evenements distants de moins d'un horizon
@@ -209,6 +250,16 @@ def run_config(spec: InstrumentSpec, series: SnapshotSeries, lo: int, hi: int,
         now = series.mid(rec)
         if ref is None or now is None or ref <= 0:
             continue
+        # Le seuil est recalcule A CHAQUE instant sur le passe seul.
+        med_spread = basis.at(ts)
+        if med_spread is None:
+            # Ce n'est PAS le refus d'un evenement : aucun evenement n'a pu
+            # etre evalue faute d'historique. Melanger les deux ferait lire
+            # « 362 000 refus pour 21 000 evenements » et donnerait l'illusion
+            # d'un systeme qui rejette tout.
+            res.n_instants_without_basis += 1
+            continue
+        threshold_bps = med_spread * threshold_spreads
         disp = (now - ref) / ref * 10_000.0
         if abs(disp) < threshold_bps:
             continue
@@ -531,6 +582,8 @@ def run(obs_path: Path, latency_ms: int = DEFAULT_LATENCY_MS,
     ledger = TrialLedger()
     disc_lo, disc_hi = proto.bounds(Split.DISCOVERY)
     discovery: Dict[str, ConfigResult] = {}
+    bases: Dict[str, TrailingSpreadBasis] = {
+        i: TrailingSpreadBasis(sr) for i, sr in seriess.items()}
     for inst_id, series in seriess.items():
         spec = specs_by_id[inst_id]
         for lb in LOOKBACKS_MS:
@@ -539,7 +592,7 @@ def run(obs_path: Path, latency_ms: int = DEFAULT_LATENCY_MS,
                     for bet in BETS:
                         r = run_config(spec, series, disc_lo, disc_hi, lb, hz,
                                        thr, Split.DISCOVERY.value, latency_ms,
-                                       bet=bet)
+                                       bet=bet, spread_basis=bases[inst_id])
                         discovery[r.key] = r
                         ledger.record(r.key,
                                       sharpe_ratio(r.net_bps)
@@ -557,8 +610,12 @@ def run(obs_path: Path, latency_ms: int = DEFAULT_LATENCY_MS,
     for r in discovery.values():
         for k, v in r.refusals.items():
             refus[k] = refus.get(k, 0) + v
+    n_nb = sum(r.n_instants_without_basis for r in discovery.values())
+    if n_nb:
+        print(f"instants non evaluables (historique de spread insuffisant) : "
+              f"{n_nb:,}  — aucun evenement rejete, aucun teste")
     if refus:
-        print("refus (aucun chiffre fabrique a la place) :")
+        print("refus d'EVENEMENTS (aucun chiffre fabrique a la place) :")
         for k, v in sorted(refus.items(), key=lambda kv: -kv[1])[:6]:
             print(f"   {v:>7,}  {k}")
     by_bet: Dict[str, Dict[str, Any]] = {}
@@ -581,6 +638,7 @@ def run(obs_path: Path, latency_ms: int = DEFAULT_LATENCY_MS,
     report["discovery"] = {
         "n_configurations": len(discovery), "n_events": n_ev,
         "n_resolved": n_res, "refusals": refus,
+        "n_instants_without_basis": n_nb,
         "n_trials": ledger.n_trials,
         "trial_sharpe_dispersion": ledger.sharpe_dispersion()}
 
@@ -636,7 +694,8 @@ def run(obs_path: Path, latency_ms: int = DEFAULT_LATENCY_MS,
         spec = specs_by_id[dr.inst_id]
         r = run_config(spec, seriess[dr.inst_id], dev_lo, dev_hi, dr.lookback_ms,
                        dr.horizon_ms, dr.threshold_spreads,
-                       Split.DEVELOPMENT.value, latency_ms, bet=dr.bet)
+                       Split.DEVELOPMENT.value, latency_ms, bet=dr.bet,
+                       spread_basis=bases[dr.inst_id])
         dev[key] = r
         ledger.record(key + "|dev", sharpe_ratio(r.net_bps)
                       if len(r.net_bps) > 1 else None, r.n_resolved, "DEV")
@@ -674,7 +733,8 @@ def run(obs_path: Path, latency_ms: int = DEFAULT_LATENCY_MS,
                                 selected.lookback_ms, selected.horizon_ms,
                                 selected.threshold_spreads,
                                 Split.VALIDATION.value, latency_ms,
-                                bet=selected.bet)
+                                bet=selected.bet,
+                                spread_basis=bases[selected.inst_id])
         print(json.dumps(val_result.to_dict(), indent=1, ensure_ascii=False))
         report["validation"] = val_result.to_dict()
     else:
@@ -694,7 +754,8 @@ def run(obs_path: Path, latency_ms: int = DEFAULT_LATENCY_MS,
                                  selected.lookback_ms, selected.horizon_ms,
                                  selected.threshold_spreads,
                                  Split.FINAL_HOLDOUT.value, latency_ms,
-                                 bet=selected.bet)
+                                 bet=selected.bet,
+                                 spread_basis=bases[selected.inst_id])
         print(json.dumps(hold_result.to_dict(), indent=1, ensure_ascii=False))
         report["final_holdout"] = hold_result.to_dict()
     else:
