@@ -35,6 +35,12 @@ DEFAULT_GRID_MS: Tuple[int, ...] = (
     10, 25, 50, 100, 250, 500, 1_000, 2_000, 5_000,
     10_000, 30_000, 60_000, 300_000, 900_000)
 
+#: Les deux paris possibles apres un deplacement observe. Tester uniquement la
+#: reversion reviendrait a supposer la reponse : la continuation est sa
+#: negation, et elle doit etre soumise au meme protocole.
+BET_REVERSION = "REVERSION"
+BET_CONTINUATION = "CONTINUATION"
+
 
 class CaptureOutcome(str, enum.Enum):
     MEASURED = "MEASURED"
@@ -132,8 +138,10 @@ class CaptureMeasurement:
     outcome: CaptureOutcome
     #: Deplacement OBSERVE entre T0-lookback et T0, en bps signes.
     observed_move_bps: Optional[float] = None
-    #: Sens teste : +1 si l'on parie sur une reversion a la hausse.
+    #: Sens teste : +1 si l'on parie sur un mouvement a la hausse.
     reversion_sign: Optional[int] = None
+    #: Quel pari a ete teste : REVERSION ou CONTINUATION.
+    bet: str = BET_REVERSION
     #: Derive pendant la latence, en bps SIGNES dans le sens du pari
     #: (negatif = le prix a fui avant l'entree).
     latency_drift_bps: Optional[float] = None
@@ -160,7 +168,8 @@ class CaptureMeasurement:
 
 def measure_capture(series: SnapshotSeries, t0_ms: int, lookback_ms: int,
                     latency_ms: int, horizon_ms: int,
-                    min_displacement_bps: float = 0.0) -> CaptureMeasurement:
+                    min_displacement_bps: float = 0.0,
+                    bet: str = BET_REVERSION) -> CaptureMeasurement:
     """Mesure la consequence d'un deplacement observe a T0.
 
     Etapes, dans cet ordre strict :
@@ -204,8 +213,12 @@ def measure_capture(series: SnapshotSeries, t0_ms: int, lookback_ms: int,
             detail=f"deplacement {observed:.4f} bps : pas de denominateur "
                    "exploitable (on ne divise pas par un mouvement nul)")
 
-    # On parie sur le RETOUR : si le prix a monte, on teste la baisse.
-    sign = -1 if observed > 0 else 1
+    # REVERSION : si le prix a monte, on teste la baisse.
+    # CONTINUATION : on parie que le mouvement se poursuit.
+    if bet == BET_CONTINUATION:
+        sign = 1 if observed > 0 else -1
+    else:
+        sign = -1 if observed > 0 else 1
 
     # Ce que la latence a deja coute AVANT l'entree, dans le sens du pari.
     drift = sign * (entry_mid - t0_mid) / t0_mid * 10_000.0
@@ -235,7 +248,7 @@ def measure_capture(series: SnapshotSeries, t0_ms: int, lookback_ms: int,
     continuation = recoverable < 0
 
     return CaptureMeasurement(
-        outcome=CaptureOutcome.MEASURED, **base,
+        outcome=CaptureOutcome.MEASURED, **base, bet=bet,
         observed_move_bps=observed, reversion_sign=sign,
         latency_drift_bps=drift, recoverable_bps=recoverable,
         capture_fraction=fraction, mfe_bps=mfe, mae_bps=mae,

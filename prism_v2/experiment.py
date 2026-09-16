@@ -36,7 +36,8 @@ from prism_v2.instruments import InstrumentSpec
 from prism_v2.observatory import load_snapshots
 from prism_v2.orderbook import Level, OrderBook
 from prism_v2.research.causal_lab import (
-    CaptureOutcome, SnapshotSeries, measure_capture,
+    BET_CONTINUATION, BET_REVERSION, CaptureOutcome, SnapshotSeries,
+    measure_capture,
 )
 from prism_v2.research.protocol import DataProtocol, Split
 from prism_v2.research.trials import (
@@ -50,7 +51,15 @@ from prism_v2.research.validation import Condition, ProofStandard, Verdict
 #: du spread median observe : il s'ADAPTE a l'instrument au lieu d'etre pose.
 LOOKBACKS_MS = (2_000, 5_000, 15_000)
 HORIZONS_MS = (2_000, 5_000, 15_000, 30_000)
-THRESHOLD_SPREADS = (1.0, 2.0, 4.0)
+#: Seuils en multiples du spread median. Les grandes valeurs sont
+#: INDISPENSABLES : le plancher de cout d'un aller-retour est d'environ 10 bps,
+#: et un evenement dont l'amplitude est de 2 bps ne peut PAS le couvrir, quelle
+#: que soit la qualite de la prevision. Ne balayer que de petits seuils
+#: reviendrait a tester uniquement des cas structurellement perdants.
+THRESHOLD_SPREADS = (1.0, 2.0, 4.0, 8.0, 16.0, 32.0)
+
+#: Les deux paris. Tester seulement la reversion supposerait la reponse.
+BETS = (BET_REVERSION, BET_CONTINUATION)
 
 #: Notionnel de sonde. Petit, pour rester dans la profondeur reellement
 #: observee (10 niveaux enregistres par l'observatoire).
@@ -107,6 +116,7 @@ class ConfigResult:
     horizon_ms: int
     threshold_spreads: float
     split: str
+    bet: str = BET_REVERSION
     n_events: int = 0
     n_resolved: int = 0
     gross_bps: List[float] = field(default_factory=list)
@@ -115,12 +125,16 @@ class ConfigResult:
     #: Horodatage de chaque evenement retenu, pour pouvoir dedoublonner entre
     #: configurations qui balayent les memes instants.
     event_ts: List[int] = field(default_factory=list)
+    #: Contexte par evenement. Sans lui, decouper par regime a posteriori
+    #: serait impossible et « ca marche en moyenne » resterait indiscutable.
+    event_spread_bps: List[float] = field(default_factory=list)
+    event_displacement_bps: List[float] = field(default_factory=list)
     refusals: Dict[str, int] = field(default_factory=dict)
 
     @property
     def key(self) -> str:
         return (f"{self.inst_id}|lb{self.lookback_ms}|h{self.horizon_ms}"
-                f"|thr{self.threshold_spreads}")
+                f"|thr{self.threshold_spreads}|{self.bet}")
 
     def mean(self, xs: Sequence[float]) -> Optional[float]:
         return sum(xs) / len(xs) if xs else None
@@ -153,7 +167,8 @@ def median_spread_bps(series: SnapshotSeries, lo: int, hi: int) -> Optional[floa
 def run_config(spec: InstrumentSpec, series: SnapshotSeries, lo: int, hi: int,
                lookback_ms: int, horizon_ms: int, threshold_spreads: float,
                split: str, latency_ms: int,
-               notional_usd: float = PROBE_NOTIONAL_USD) -> ConfigResult:
+               notional_usd: float = PROBE_NOTIONAL_USD,
+               bet: str = BET_REVERSION) -> ConfigResult:
     """Balaye un segment, declenche AU FRANCHISSEMENT, mesure net de couts.
 
     Le declenchement se fait au franchissement du seuil, PAS sur une grille
@@ -163,7 +178,7 @@ def run_config(spec: InstrumentSpec, series: SnapshotSeries, lo: int, hi: int,
     """
     res = ConfigResult(inst_id=spec.inst_id, lookback_ms=lookback_ms,
                        horizon_ms=horizon_ms, threshold_spreads=threshold_spreads,
-                       split=split)
+                       split=split, bet=bet)
     med_spread = median_spread_bps(series, lo, hi)
     if med_spread is None:
         res.refusals["spread median inconnu"] = 1
@@ -195,7 +210,7 @@ def run_config(spec: InstrumentSpec, series: SnapshotSeries, lo: int, hi: int,
         last_event_ts = ts
         res.n_events += 1
         m = measure_capture(series, ts, lookback_ms, latency_ms, horizon_ms,
-                            min_displacement_bps=threshold_bps)
+                            min_displacement_bps=threshold_bps, bet=bet)
         if m.outcome is not CaptureOutcome.MEASURED:
             res.refusals[m.outcome.value] = res.refusals.get(m.outcome.value, 0) + 1
             continue
@@ -230,10 +245,124 @@ def run_config(spec: InstrumentSpec, series: SnapshotSeries, lo: int, hi: int,
 
         res.n_resolved += 1
         res.event_ts.append(ts)
+        res.event_spread_bps.append(m.spread_at_entry_bps or 0.0)
+        res.event_displacement_bps.append(abs(m.observed_move_bps))
         res.gross_bps.append(m.recoverable_bps)
         res.net_bps.append(net)
         res.fractions.append(m.capture_fraction)
     return res
+
+
+
+# ══════════════════════════════════════════════════════════════════════════
+def _stats(xs: Sequence[float]) -> Dict[str, Any]:
+    n = len(xs)
+    if not n:
+        return {"n": 0, "mean": None, "stderr": None, "t_stat": None}
+    mean = sum(xs) / n
+    if n < 2:
+        return {"n": n, "mean": mean, "stderr": None, "t_stat": None}
+    var = sum((x - mean) ** 2 for x in xs) / (n - 1)
+    se = (var / n) ** 0.5
+    return {"n": n, "mean": mean, "stderr": se,
+            "t_stat": mean / se if se > 0 else None}
+
+
+def regime_analysis(configs: Sequence[ConfigResult]) -> Dict[str, Any]:
+    """Decoupe les resultats par regime observable.
+
+    « Ca marche en moyenne » n'est pas un resultat robuste : un effet
+    entierement porte par un seul regime est une dependance de regime, pas une
+    relation. Le decoupage est fait sur des grandeurs OBSERVABLES A LA
+    DECISION (heure, spread, amplitude du deplacement), jamais sur l'issue.
+    """
+    rows: List[Tuple[int, float, float, float]] = []
+    seen: set = set()
+    for c in configs:
+        for ts, sp, disp, net in zip(c.event_ts, c.event_spread_bps,
+                                     c.event_displacement_bps, c.net_bps):
+            k = (c.inst_id, ts)
+            if k in seen:
+                continue                      # meme dedoublonnage qu'ailleurs
+            seen.add(k)
+            rows.append((ts, sp, disp, net))
+    if len(rows) < 6:
+        return {"n": len(rows),
+                "note": "echantillon trop faible pour decouper par regime"}
+
+    out: Dict[str, Any] = {"n_events": len(rows), "overall": _stats(
+        [r[3] for r in rows])}
+
+    def terciles(key_idx: int, label: str) -> Dict[str, Any]:
+        vals = sorted(r[key_idx] for r in rows)
+        lo = vals[len(vals) // 3]
+        hi = vals[2 * len(vals) // 3]
+        buckets = {"bas": [], "moyen": [], "haut": []}
+        for r in rows:
+            v = r[key_idx]
+            buckets["bas" if v <= lo else ("haut" if v >= hi else "moyen")
+                    ].append(r[3])
+        return {"cutoffs": [lo, hi],
+                **{k: _stats(v) for k, v in buckets.items()}}
+
+    out["by_spread"] = terciles(1, "spread")
+    out["by_displacement"] = terciles(2, "amplitude")
+    by_hour: Dict[int, List[float]] = {}
+    for ts, _sp, _d, net in rows:
+        by_hour.setdefault(time.gmtime(ts / 1000).tm_hour, []).append(net)
+    out["by_hour_utc"] = {str(h): _stats(v)
+                          for h, v in sorted(by_hour.items()) if len(v) >= 5}
+    # Un effet concentre sur un seul regime est nomme comme tel.
+    sub = [v for k, v in out["by_spread"].items()
+           if isinstance(v, dict) and v.get("mean") is not None]
+    if sub:
+        pos = [v for v in sub if v["mean"] > 0]
+        out["concentrated_in_one_spread_regime"] = len(pos) == 1
+    return out
+
+
+def decay_analysis(configs: Sequence[ConfigResult], n_buckets: int = 6
+                   ) -> Dict[str, Any]:
+    """Le resultat se deplace-t-il dans le temps ?
+
+    Une inefficience qui s'eteint pendant la fenetre d'observation n'est pas
+    la meme chose qu'une inefficience persistante, et le systeme ne doit pas
+    les confondre.
+    """
+    rows: List[Tuple[int, float]] = []
+    seen: set = set()
+    for c in configs:
+        for ts, net in zip(c.event_ts, c.net_bps):
+            k = (c.inst_id, ts)
+            if k in seen:
+                continue
+            seen.add(k)
+            rows.append((ts, net))
+    if len(rows) < n_buckets * 3:
+        return {"n": len(rows),
+                "note": f"moins de {n_buckets * 3} evenements : decroissance "
+                        "non mesurable"}
+    rows.sort(key=lambda r: r[0])
+    lo, hi = rows[0][0], rows[-1][0]
+    width = max(1, (hi - lo) // n_buckets)
+    buckets: Dict[int, List[float]] = {}
+    for ts, net in rows:
+        buckets.setdefault(min(n_buckets - 1, (ts - lo) // width), []).append(net)
+    series = [{"bucket": int(b), "from_min": round((b * width) / 60000, 1),
+               **_stats(v)} for b, v in sorted(buckets.items())]
+    means = [s["mean"] for s in series if s["mean"] is not None]
+    trend = None
+    if len(means) >= 3:
+        n = len(means)
+        xs = list(range(n))
+        mx, my = sum(xs) / n, sum(means) / n
+        den = sum((x - mx) ** 2 for x in xs)
+        trend = (sum((x - mx) * (y - my) for x, y in zip(xs, means)) / den
+                 if den else None)
+    return {"n_events": len(rows), "buckets": series, "slope_per_bucket": trend,
+            "note": ("pente negative = le resultat se degrade pendant la "
+                     "fenetre. Une fenetre de quelques heures ne permet PAS "
+                     "de distinguer une decroissance d'une fluctuation.")}
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -291,12 +420,16 @@ def run(obs_path: Path, latency_ms: int = DEFAULT_LATENCY_MS,
         for lb in LOOKBACKS_MS:
             for hz in HORIZONS_MS:
                 for thr in THRESHOLD_SPREADS:
-                    r = run_config(spec, series, disc_lo, disc_hi, lb, hz, thr,
-                                   Split.DISCOVERY.value, latency_ms)
-                    discovery[r.key] = r
-                    ledger.record(r.key, sharpe_ratio(r.net_bps) if len(r.net_bps) > 1
-                                  else None, r.n_resolved,
-                                  "RESOLVED" if r.n_resolved else "NO_DATA")
+                    for bet in BETS:
+                        r = run_config(spec, series, disc_lo, disc_hi, lb, hz,
+                                       thr, Split.DISCOVERY.value, latency_ms,
+                                       bet=bet)
+                        discovery[r.key] = r
+                        ledger.record(r.key,
+                                      sharpe_ratio(r.net_bps)
+                                      if len(r.net_bps) > 1 else None,
+                                      r.n_resolved,
+                                      "RESOLVED" if r.n_resolved else "NO_DATA")
     n_ev = sum(r.n_events for r in discovery.values())
     n_res = sum(r.n_resolved for r in discovery.values())
     print(f"configurations essayees : {len(discovery):,}")
@@ -312,6 +445,23 @@ def run(obs_path: Path, latency_ms: int = DEFAULT_LATENCY_MS,
         print("refus (aucun chiffre fabrique a la place) :")
         for k, v in sorted(refus.items(), key=lambda kv: -kv[1])[:6]:
             print(f"   {v:>7,}  {k}")
+    by_bet: Dict[str, Dict[str, Any]] = {}
+    for b in BETS:
+        nets = [x for r in discovery.values() if r.bet == b for x in r.net_bps]
+        gross = [x for r in discovery.values() if r.bet == b for x in r.gross_bps]
+        by_bet[b] = {"n": len(nets),
+                     "mean_net_bps": sum(nets) / len(nets) if nets else None,
+                     "mean_gross_bps": sum(gross) / len(gross) if gross else None,
+                     "share_gross_positive":
+                         (sum(1 for x in gross if x > 0) / len(gross))
+                         if gross else None}
+    print("\npar PARI (la continuation est la negation de la reversion) :")
+    for b, st in by_bet.items():
+        if st["n"]:
+            print(f"  {b:<13} N={st['n']:>6,}  brut {st['mean_gross_bps']:+.4f} bps"
+                  f"  net {st['mean_net_bps']:+.4f} bps"
+                  f"  part brut>0 {st['share_gross_positive']:.1%}")
+    report["by_bet"] = by_bet
     report["discovery"] = {
         "n_configurations": len(discovery), "n_events": n_ev,
         "n_resolved": n_res, "refusals": refus,
@@ -370,7 +520,7 @@ def run(obs_path: Path, latency_ms: int = DEFAULT_LATENCY_MS,
         spec = specs_by_id[dr.inst_id]
         r = run_config(spec, seriess[dr.inst_id], dev_lo, dev_hi, dr.lookback_ms,
                        dr.horizon_ms, dr.threshold_spreads,
-                       Split.DEVELOPMENT.value, latency_ms)
+                       Split.DEVELOPMENT.value, latency_ms, bet=dr.bet)
         dev[key] = r
         ledger.record(key + "|dev", sharpe_ratio(r.net_bps)
                       if len(r.net_bps) > 1 else None, r.n_resolved, "DEV")
@@ -407,7 +557,8 @@ def run(obs_path: Path, latency_ms: int = DEFAULT_LATENCY_MS,
                                 seriess[selected.inst_id], vlo, vhi,
                                 selected.lookback_ms, selected.horizon_ms,
                                 selected.threshold_spreads,
-                                Split.VALIDATION.value, latency_ms)
+                                Split.VALIDATION.value, latency_ms,
+                                bet=selected.bet)
         print(json.dumps(val_result.to_dict(), indent=1, ensure_ascii=False))
         report["validation"] = val_result.to_dict()
     else:
@@ -426,7 +577,8 @@ def run(obs_path: Path, latency_ms: int = DEFAULT_LATENCY_MS,
                                  seriess[selected.inst_id], hlo, hhi,
                                  selected.lookback_ms, selected.horizon_ms,
                                  selected.threshold_spreads,
-                                 Split.FINAL_HOLDOUT.value, latency_ms)
+                                 Split.FINAL_HOLDOUT.value, latency_ms,
+                                 bet=selected.bet)
         print(json.dumps(hold_result.to_dict(), indent=1, ensure_ascii=False))
         report["final_holdout"] = hold_result.to_dict()
     else:
@@ -470,6 +622,39 @@ def run(obs_path: Path, latency_ms: int = DEFAULT_LATENCY_MS,
     report["multiple_testing"] = {"n_trials": ledger.n_trials,
                                   "sharpe_dispersion": disp,
                                   "deflated_sharpe": ds, "pbo": pbo}
+
+    # ── 7bis. REGIMES ET DECROISSANCE ─────────────────────────────────────
+    print(); print("=" * 84)
+    print("7bis. REGIMES ET DECROISSANCE"); print("=" * 84)
+    reg = regime_analysis(list(discovery.values()))
+    dec = decay_analysis(list(discovery.values()))
+    if reg.get("n_events"):
+        ov = reg["overall"]
+        print(f"ensemble : net {ov['mean']:+.4f} bps "
+              f"(N={ov['n']:,}, t={ov['t_stat']:+.2f})" if ov["t_stat"] is not None
+              else f"ensemble : N={ov['n']}")
+        for label, key in (("par spread", "by_spread"),
+                           ("par amplitude", "by_displacement")):
+            b = reg.get(key, {})
+            cells = []
+            for name in ("bas", "moyen", "haut"):
+                st = b.get(name, {})
+                cells.append(f"{name}={st.get('mean'):+.3f}"
+                             if st.get("mean") is not None else f"{name}=n/a")
+            print(f"  {label:<16} " + "  ".join(cells))
+        if reg.get("concentrated_in_one_spread_regime"):
+            print("  ATTENTION : effet concentre sur UN SEUL regime de spread "
+                  "— dependance de regime, pas relation")
+    else:
+        print(reg.get("note"))
+    if dec.get("buckets"):
+        print(f"decroissance : pente {dec['slope_per_bucket']} bps/tranche "
+              f"sur {len(dec['buckets'])} tranches")
+        print(f"  {dec['note']}")
+    else:
+        print(dec.get("note"))
+    report["regimes"] = reg
+    report["decay"] = dec
 
     # ── 8. ENTONNOIR : OU MEURT L'EDGE ────────────────────────────────────
     print(); print("=" * 84); print("8. OU MEURT L'EDGE"); print("=" * 84)

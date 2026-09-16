@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import gzip
 import json
+import zlib
 import signal
 import time
 from dataclasses import dataclass, field
@@ -324,7 +325,7 @@ def load_snapshots(path: Path, inst_id: Optional[str] = None,
             while True:
                 try:
                     line = fh.readline()
-                except (EOFError, OSError) as exc:
+                except (EOFError, OSError, zlib.error) as exc:
                     truncated = True
                     meta["truncation_reason"] = f"{type(exc).__name__}: {exc}"[:120]
                     break
@@ -346,7 +347,7 @@ def load_snapshots(path: Path, inst_id: Optional[str] = None,
                 out.append(rec)
                 if max_records is not None and len(out) >= max_records:
                     break
-    except (EOFError, OSError) as exc:
+    except (EOFError, OSError, zlib.error) as exc:
         truncated = True
         meta["truncation_reason"] = f"{type(exc).__name__}: {exc}"[:120]
     meta["truncated"] = truncated

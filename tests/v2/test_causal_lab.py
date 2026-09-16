@@ -355,3 +355,60 @@ class TestAggregationDoesNotInflateSignificance(unittest.TestCase):
                          threshold_spreads=1.0, split="DISCOVERY")
         self.assertIn("event_ts", r.__dataclass_fields__)
         self.assertEqual(len(r.event_ts), len(r.gross_bps))
+
+
+class TestBothBetsAreTested(unittest.TestCase):
+    """Ne tester que la reversion reviendrait a supposer la reponse."""
+
+    def setUp(self):
+        from prism_v2.research.causal_lab import BET_CONTINUATION, BET_REVERSION
+        self.REV, self.CONT = BET_REVERSION, BET_CONTINUATION
+        self.recs, self.truth = planted_reversion(0.5, 5_000, 5_000, spec=SPEC)
+        self.s = series_from(self.recs)
+
+    def _both(self, idx):
+        t0 = self.s.first_ts + idx * SPEC.cadence_ms
+        a = measure_capture(self.s, t0, 5_000, 250, 5_000,
+                            min_displacement_bps=6.0, bet=self.REV)
+        b = measure_capture(self.s, t0, 5_000, 250, 5_000,
+                            min_displacement_bps=6.0, bet=self.CONT)
+        return a, b
+
+    def test_continuation_is_the_exact_negation_of_reversion(self):
+        checked = 0
+        for idx in self.truth["trigger_indices"][:60]:
+            a, b = self._both(idx)
+            if (a.outcome is CaptureOutcome.MEASURED
+                    and b.outcome is CaptureOutcome.MEASURED):
+                self.assertEqual(a.reversion_sign, -b.reversion_sign)
+                self.assertAlmostEqual(a.recoverable_bps, -b.recoverable_bps,
+                                       places=9)
+                checked += 1
+        self.assertGreater(checked, 10, "trop peu de paires comparables")
+
+    def test_the_bet_is_recorded_on_the_measurement(self):
+        a, b = self._both(self.truth["trigger_indices"][3])
+        self.assertEqual(a.bet, self.REV)
+        self.assertEqual(b.bet, self.CONT)
+        self.assertIn("bet", a.to_dict())
+
+    def test_planted_reversion_favours_the_reversion_bet(self):
+        """Controle de sens : sur un effet de reversion plante, c'est le pari
+        de reversion qui doit gagner, pas l'inverse."""
+        rev, cont = [], []
+        for idx in self.truth["trigger_indices"]:
+            a, b = self._both(idx)
+            if a.outcome is CaptureOutcome.MEASURED:
+                rev.append(a.recoverable_bps)
+            if b.outcome is CaptureOutcome.MEASURED:
+                cont.append(b.recoverable_bps)
+        self.assertGreater(len(rev), 50)
+        self.assertGreater(sum(rev) / len(rev), sum(cont) / len(cont))
+
+    def test_threshold_grid_reaches_beyond_the_cost_floor(self):
+        """Un evenement de 2 bps ne peut PAS couvrir un aller-retour a 10 bps.
+        Ne balayer que de petits seuils testerait uniquement des cas
+        structurellement perdants."""
+        from prism_v2.experiment import FEE_BPS_PER_LEG, THRESHOLD_SPREADS
+        self.assertGreaterEqual(max(THRESHOLD_SPREADS) , 16.0)
+        self.assertGreaterEqual(max(THRESHOLD_SPREADS), FEE_BPS_PER_LEG * 2)
