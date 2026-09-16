@@ -575,6 +575,33 @@ class Test09MissingSlippage(unittest.TestCase):
         br = costs.build_breakdown(book, "ask", 1_000.0, strict_fees=False)
         self.assertIn(br.weakest_quality(), (Quality.ASSUMED, Quality.UNKNOWN))
 
+    def test_maker_cannot_be_validated_while_adverse_selection_is_unknown(self):
+        """Point 21 de la checklist. Un MAKER est rempli PARCE QUE le marche
+        continue : l'adverse selection est le cout central de ce style, et il
+        n'est pas mesurable sans fills reels."""
+        book = simple_inverse_book()
+        br = costs.build_breakdown(book, "ask", 1_000.0, strict_fees=False,
+                                   style=costs.ExecutionStyle.MAKER)
+        self.assertIn("adverse_selection", br.essential_names())
+        self.assertIn("adverse_selection", br.unresolved_essentials())
+        self.assertIsNone(br.total_bps())
+
+    def test_taker_declares_adverse_selection_not_applicable_with_a_reason(self):
+        book = simple_inverse_book()
+        br = costs.build_breakdown(book, "ask", 1_000.0, strict_fees=False,
+                                   style=costs.ExecutionStyle.TAKER)
+        self.assertNotIn("adverse_selection", br.essential_names())
+        self.assertTrue(br.by_name()["adverse_selection"].note)
+
+    def test_leg_risk_is_declared_and_execution_refused(self):
+        """Point 20. On ne gere pas l'echec de couverture : on ne prend
+        jamais le risque de jambe, faute d'executeur multi-instruments."""
+        src = (V2 / "detectors" / "cross_market.py").read_text(encoding="utf-8")
+        self.assertIn('"leg_risk": True', src)
+        self.assertIn("TAKER_BOTH_LEGS", src)
+        hunt = (V2 / "edge_hunt.py").read_text(encoding="utf-8")
+        self.assertIn("BOTH_LEGS", hunt)
+
     def test_discovery_mode_cannot_authorise_execution(self):
         self.assertFalse(EvaluationMode.DISCOVERY.allows_capital)
         self.assertTrue(quality_satisfies(Quality.OBSERVED,
