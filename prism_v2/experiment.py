@@ -44,7 +44,9 @@ from prism_v2.research.trials import (
     TrialLedger, deflated_sharpe, probability_of_backtest_overfitting,
     sharpe_ratio,
 )
-from prism_v2.research.validation import Condition, ProofStandard, Verdict
+from prism_v2.research.validation import (
+    Condition, MIN_TRADES, ProofStandard, Verdict,
+)
 
 #: Espace de configurations balaye. Chaque combinaison est un ESSAI compte
 #: dans la correction pour tests multiples. Le seuil est exprime en multiples
@@ -696,10 +698,18 @@ def run(obs_path: Path, latency_ms: int = DEFAULT_LATENCY_MS,
               "aller-retour restent UNKNOWN : non mesurables sans ordres reels")
     ps.assess(Condition.EXECUTION_REALISM, True,
               "traversee du carnet reel aux deux instants")
+    # ENOUGH_TRADES repond a « l'experience a-t-elle vu assez pour conclure ? »
+    # et NON a « la configuration retenue a-t-elle assez d'evenements ? ».
+    # Confondre les deux faisait rendre INSUFFICIENT_DATA alors que 22 993
+    # evenements avaient ete mesures et qu'aucun n'etait net positif : c'est
+    # NO_VALIDATED_EDGE, la conclusion inverse.
     n_sel = selected.n_resolved if selected else 0
-    ps.assess(Condition.ENOUGH_TRADES, n_sel >= 30,
-              f"{n_sel} evenements resolus sur la configuration selectionnee "
-              f"(minimum 30)")
+    enough = n_res >= MIN_TRADES and (selected is None or n_sel >= MIN_TRADES)
+    ps.assess(Condition.ENOUGH_TRADES, enough,
+              (f"{n_res:,} evenements resolus au total"
+               + (f", dont {n_sel} sur la configuration retenue" if selected
+                  else " ; aucune configuration retenue")
+               + f" (minimum {MIN_TRADES})"))
     ps.assess(Condition.NET_POSITIVE,
               bool(selected and (selected.mean(selected.net_bps) or -1) > 0),
               f"net moyen {selected.mean(selected.net_bps):+.4f} bps" if selected

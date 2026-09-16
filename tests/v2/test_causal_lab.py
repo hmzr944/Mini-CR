@@ -412,3 +412,44 @@ class TestBothBetsAreTested(unittest.TestCase):
         from prism_v2.experiment import FEE_BPS_PER_LEG, THRESHOLD_SPREADS
         self.assertGreaterEqual(max(THRESHOLD_SPREADS) , 16.0)
         self.assertGreaterEqual(max(THRESHOLD_SPREADS), FEE_BPS_PER_LEG * 2)
+
+
+class TestVerdictDistinguishesAbsenceFromIgnorance(unittest.TestCase):
+    """« Rien trouve » et « pas assez regarde » sont des conclusions opposees.
+
+    Defaut reel : avec 22 993 evenements mesures et aucun net positif, le
+    verdict rendu etait INSUFFICIENT_DATA — l'inverse de la verite.
+    """
+
+    def _standard(self, **over):
+        from prism_v2.research.validation import Condition as C, ProofStandard
+        base = {c: True for c in C}
+        base.update(over)
+        ps = ProofStandard()
+        for c, v in base.items():
+            ps.assess(c, v, "test")
+        return ps
+
+    def test_many_events_and_nothing_positive_is_no_validated_edge(self):
+        from prism_v2.research.validation import Condition as C, Verdict
+        ps = self._standard(**{C.NET_POSITIVE: False, C.OUT_OF_SAMPLE: False,
+                               C.TEMPORAL_STABILITY: False, C.CAPACITY: False,
+                               C.RISK_MEASURED: False, C.DRAWDOWN_MEASURED: False,
+                               C.MULTIPLE_TESTING: False,
+                               C.NO_CRITICAL_UNKNOWN: False})
+        self.assertIs(ps.verdict(), Verdict.NO_VALIDATED_EDGE)
+
+    def test_too_few_events_is_insufficient_data(self):
+        from prism_v2.research.validation import Condition as C, Verdict
+        ps = self._standard(**{C.ENOUGH_TRADES: False})
+        self.assertIs(ps.verdict(), Verdict.INSUFFICIENT_DATA)
+
+    def test_positive_but_failing_holdout_is_not_robust(self):
+        from prism_v2.research.validation import Condition as C, Verdict
+        ps = self._standard(**{C.OUT_OF_SAMPLE: False})
+        self.assertIs(ps.verdict(), Verdict.EDGE_NOT_ROBUST)
+
+    def test_positive_but_not_executable_is_named_as_such(self):
+        from prism_v2.research.validation import Condition as C, Verdict
+        ps = self._standard(**{C.CAPACITY: False})
+        self.assertIs(ps.verdict(), Verdict.EDGE_NOT_EXECUTABLE)
