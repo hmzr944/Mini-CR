@@ -59,6 +59,10 @@ DEFAULT_DEPTH_LEVELS = 10
 class ObservatoryStats:
     started_at: str = ""
     finished_at: str = ""
+    #: Rafraichi periodiquement pendant la collecte. Un heartbeat qui cesse
+    #: d'avancer signale une panne, qu'un fichier simplement muet ne dirait pas.
+    heartbeat_at: str = ""
+    elapsed_s: float = 0.0
     snapshots_written: int = 0
     invalid_snapshots: int = 0
     messages: int = 0
@@ -156,11 +160,14 @@ class MarketObservatory:
                             self._ingest(msg, books, trades, liquidations,
                                          fresh_trade_bucket, stats)
                     except Exception as exc:                  # noqa: BLE001
+                        # On NE saute PAS l'ecriture d'instantanes : pendant une
+                        # tempete de reconnexions, `continue` ici laissait le
+                        # fichier muet sans que rien ne le signale. Les carnets
+                        # deviennent invalides et sont ecrits comme tels.
                         stats.errors.append(f"{type(exc).__name__}: {exc}"[:200])
                         client = None
                         time.sleep(min(backoff, self.max_backoff_s))
                         backoff = min(backoff * 2, self.max_backoff_s)
-                        continue
 
                     now = time.monotonic()
                     if now >= next_snapshot:
@@ -179,6 +186,16 @@ class MarketObservatory:
                             try:
                                 fh.flush()
                             except (OSError, ValueError):
+                                pass
+                            stats.heartbeat_at = utc_now_iso()
+                            stats.elapsed_s = round(
+                                duration_s - (deadline - now), 1)
+                            try:
+                                (path.parent / (path.name + ".stats.json")
+                                 ).write_text(json.dumps(stats.to_dict(), indent=1,
+                                                         ensure_ascii=False),
+                                              encoding="utf-8")
+                            except OSError:
                                 pass
         finally:
             stats.finished_at = utc_now_iso()
