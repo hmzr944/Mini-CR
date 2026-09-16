@@ -27,7 +27,8 @@ from prism_v2.research.hypothesis import (
     MultipleTestingAccount, Phenomenon, Relation,
 )
 from prism_v2.research.observation import FEATURE_SPACE, ObservationLog, observe_state
-from prism_v2.research.open_discovery_test import DiscoveryClass, audit
+from prism_v2.research.observation import FEATURE_SPACE as _FS
+from prism_v2.research.open_discovery import DiscoveryClass, audit
 from prism_v2.research.orchestrator import ResearchOrchestrator
 from prism_v2.research.pipeline import ResearchPipeline
 
@@ -478,18 +479,53 @@ class TestFeeQualityLevels(unittest.TestCase):
 
 
 class TestOpenDiscoveryHonesty(unittest.TestCase):
-    def test_verdict_is_structured_not_open(self):
-        a = audit()
-        self.assertIs(a.discovery_class, DiscoveryClass.STRUCTURED)
-        self.assertIsNot(a.discovery_class, DiscoveryClass.OPEN)
+    """Le verdict d'ouverture doit etre MESURE, jamais ecrit en dur.
+
+    La version precedente retournait STRUCTURED comme une constante : elle ne
+    pouvait ni se tromper, ni changer quand le systeme changeait.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.a = audit(len(_FS), 4, 2, 18, composition_arity=1,
+                      realised_size=1678)
+
+    def test_verdict_is_bounded_not_open(self):
+        self.assertIs(self.a.discovery_class, DiscoveryClass.BOUNDED)
+        self.assertIsNot(self.a.discovery_class, DiscoveryClass.OPEN)
+
+    def test_verdict_follows_from_the_measured_space(self):
+        """BOUNDED decoule du fait que l'espace est enumerable, pas d'une
+        constante : rendre l'espace non enumerable changerait le verdict."""
+        self.assertTrue(self.a.space.is_enumerable_by_hand)
+        self.assertEqual(self.a.space.enumerable_size, len(_FS) * 4 * 2 * 18)
+
+    def test_composition_enlarges_the_space(self):
+        a1 = audit(15, 4, 2, 18, composition_arity=1, run_empirical_tests=False)
+        a2 = audit(15, 4, 2, 18, composition_arity=2, run_empirical_tests=False)
+        self.assertGreater(a2.space.enumerable_size, a1.space.enumerable_size)
+
+    def test_engine_is_not_blind(self):
+        """Sans cette mesure, « 0 survivant » est ininterpretable."""
+        self.assertFalse(self.a.engine_is_blind,
+                         f"le moteur rate un effet plante: {self.a.sensitivity}")
+
+    def test_engine_does_not_hallucinate(self):
+        self.assertFalse(self.a.engine_hallucinates,
+                         f"le moteur trouve un effet dans du bruit: "
+                         f"{self.a.specificity}")
+
+    def test_unverified_audit_is_undetermined_not_favourable(self):
+        a = audit(15, 4, 2, 18, run_empirical_tests=False)
+        self.assertIs(a.discovery_class, DiscoveryClass.UNDETERMINED)
+        self.assertIsNone(a.engine_is_blind)
 
     def test_all_strategy_inputs_are_withheld(self):
-        self.assertTrue(all(audit().inputs_withheld.values()))
+        self.assertTrue(all(self.a.inputs_withheld.values()))
 
-    def test_limitations_name_the_handwritten_space(self):
-        a = audit()
-        self.assertTrue(any("ECRIT A LA MAIN" in l for l in a.limitations))
-        self.assertTrue(any("composition" in l.lower() for l in a.limitations))
+    def test_limitations_name_the_bounded_space(self):
+        self.assertTrue(any("enumerable" in l for l in self.a.limitations))
+        self.assertTrue(any("composition" in l.lower() for l in self.a.limitations))
 
     def test_research_layer_does_not_import_detectors(self):
         """Preuve mecanique qu'aucune famille codee n'intervient."""
