@@ -19,6 +19,15 @@ authentifié. `ExecutionMode` ne contient qu'une valeur : `PAPER`.
 4. Un coût `UNKNOWN` ne devient **jamais** zéro → statut `UNRESOLVED`.
 5. Toute opportunité, **même rejetée**, produit un enregistrement au ledger.
 
+## Deux couches
+
+```
+DISCOVERY  — cherche activement sur 9 familles, raisonne par bornes
+CAPTURE    — confronte aux coûts réels, exécute en PAPER, mémorise
+```
+
+Voir [`DISCOVERY.md`](DISCOVERY.md) pour le moteur de découverte.
+
 ## Chaîne non contournable
 
 ```
@@ -54,14 +63,25 @@ abandonner une piste vivante ou poursuivre une piste morte.
 | `replay.py` | replay événementiel, grille de latence, **anti-look-ahead structurel** |
 | `failure_memory.py` | taxonomie des causes de rejet |
 | `edge_health.py` | distributions avec N, **aucun score magique** |
-| `opportunities/dislocation.py` | adaptateur M2, isolé du noyau |
+| `modes.py` | modes d'évaluation + barrière DISCOVERY→PAPER→DEMO→LIVE |
+| `market_state.py` | état microstructurel (microprix, flux, profondeur) |
+| `discovery.py` | Discovery Engine, 9 familles, priorité adaptative |
+| `discovery_economics.py` | économie **par bornes** — UNKNOWN encadré, jamais nul |
+| `detectors/` | 9 détecteurs, isolés du noyau |
+| `l2book.py` | carnet **incrémental** (seqId chaîné + checksum) |
+| `venues.py` | adaptateurs multi-venues (OKX, Hyperliquid) |
+| `router.py` | Capital Router — classement économique, peut tout refuser |
+| `sizing.py` | taille bornée + courbe taille→capture nette |
+| `discovery_memory.py` | conditions → issues, tableau de contingence |
+| `edge_hunt.py` | runner EDGE_HUNT |
+| `opportunities/dislocation.py` | adaptateur M2 ex-post, isolé du noyau |
 
 Dépendances : **stdlib seule**.
 
 ## Usage
 
 ```bash
-python3 -m unittest discover -s tests/v2 -t . -p 'test_*.py'   # 227 tests
+python3 -m unittest discover -s tests/v2 -t . -p 'test_*.py'   # 314 tests
 python3 tests/v2/test_contracts_reference.py --table           # table de référence
 python3 -m prism_v2.smoke_test --duration 30 --instruments 5   # pipeline réel
 ```

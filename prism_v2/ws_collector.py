@@ -138,6 +138,10 @@ class EventCollector:
                             continue
                         arg = payload.get("arg") or {}
                         channel = arg.get("channel", "?")
+                        # `action` distingue snapshot et update sur le canal
+                        # `books`. Sans lui, le replay traite un delta comme
+                        # un carnet complet et produit un carnet tronque.
+                        action = payload.get("action")
                         inst_id = arg.get("instId") or ""
                         rows = payload.get("data") or []
                         for row in rows:
@@ -152,6 +156,7 @@ class EventCollector:
                                 issues = []
                             record = {
                                 "channel": channel,
+                                "action": action,
                                 "inst_id": rid,
                                 "exchange_ts_ms": _as_int(row.get("ts")),
                                 "local_recv_ts_ms": msg.local_recv_ts_ms,

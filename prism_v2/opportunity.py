@@ -77,6 +77,29 @@ class Candidate:
     confidence_definition: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
 
+    # ── champs de decouverte (ajoutes a l'etape Discovery Engine) ────────
+    #: Famille d'inefficience. Permet d'agreger et de prioriser la recherche.
+    family: str = "UNSPECIFIED"
+    #: Identifiant stable, pour correler detection -> execution -> ledger.
+    candidate_id: str = ""
+    #: Instant de reference CAUSAL : aucune donnee posterieure n'a ete
+    #: utilisee pour produire cette candidate. C'est la borne que le
+    #: simulateur fera respecter.
+    causal_reference_ts_ms: Optional[int] = None
+    #: Horizon attendu de la capture, en ms. Determine si un maker a le temps
+    #: d'etre rempli, et quel cout de funding s'applique.
+    expected_horizon_ms: Optional[int] = None
+    #: Mode d'execution que la capture EXIGE (TAKER/MAKER/...). Une capture
+    #: tres courte n'est pas capturable en maker.
+    required_execution: Optional[str] = None
+    #: Conditions qui invalident la candidate si elles surviennent avant
+    #: l'execution. Verifiees par le simulateur causal.
+    invalidation_conditions: Dict[str, Any] = field(default_factory=dict)
+    #: Autres jambes (arbitrage, hedge). Chacune porte son InstrumentSpec.
+    legs: List[Dict[str, Any]] = field(default_factory=list)
+    #: Etat de marche observe au moment de la detection.
+    observed_state: Dict[str, Any] = field(default_factory=dict)
+
     def __post_init__(self) -> None:
         if not isinstance(self.instrument, InstrumentSpec):
             raise TypeError("Candidate.instrument doit etre un InstrumentSpec complet, "
@@ -103,6 +126,14 @@ class Candidate:
             "confidence_definition": self.confidence_definition,
             "metadata": self.metadata,
             "provenance": self.provenance.to_dict(),
+            "family": self.family,
+            "candidate_id": self.candidate_id,
+            "causal_reference_ts_ms": self.causal_reference_ts_ms,
+            "expected_horizon_ms": self.expected_horizon_ms,
+            "required_execution": self.required_execution,
+            "invalidation_conditions": self.invalidation_conditions,
+            "legs": self.legs,
+            "observed_state": self.observed_state,
         }
 
 

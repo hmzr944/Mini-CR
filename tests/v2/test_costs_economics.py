@@ -152,15 +152,49 @@ class TestCostsFromBook(unittest.TestCase):
         self.assertEqual(sorted(b.unresolved_essentials()),
                          ["fees", "latency", "slippage"])
 
-    def test_paper_slippage_zero_no_longer_exists(self):
-        """Correction du Prompt 3 : un fill simule sur le carnet du meme
-        instant ne MESURE pas le slippage d'execution, il le contourne.
-        Aucune fabrique ne doit produire un slippage nul 'parce que PAPER'."""
-        import prism_v2.costs as costs_mod
-        self.assertFalse([n for n in dir(costs_mod) if "paper" in n.lower()
-                          and "slippage" in n.lower()])
+    def test_default_slippage_is_unknown_never_zero(self):
+        """Un fill simule sur le carnet du meme instant ne MESURE pas le
+        slippage : il le contourne. Par defaut il reste donc UNKNOWN."""
         b = build_breakdown(simple_inverse_book(), "ask", 500.0, strict_fees=False)
         self.assertIn("slippage", b.unresolved_essentials())
+
+    def test_paper_exclusion_is_explicit_and_never_observed(self):
+        """L'exclusion PAPER est autorisee, mais elle doit etre BRUYANTE :
+        jamais OBSERVED/DERIVED, marquee EXCLU, et documentee comme borne."""
+        from prism_v2.costs import is_excluded, slippage_excluded_for_paper_validation
+        c = slippage_excluded_for_paper_validation()
+        self.assertTrue(is_excluded(c))
+        self.assertIs(c.quality, Quality.ASSUMED)
+        self.assertNotIn(c.quality, (Quality.OBSERVED, Quality.DERIVED))
+        self.assertIn("EXCLUSION", c.note)
+        self.assertIn("BORNE", c.note.upper())
+
+    def test_execution_mode_refuses_excluded_components(self):
+        """Le garde qui compte : on n'engage pas de capital sur une friction
+        qu'on a declaree absente."""
+        from prism_v2.costs import slippage_excluded_for_paper_validation
+        from prism_v2.modes import EvaluationMode
+        b = build_breakdown(simple_inverse_book(), "ask", 500.0, strict_fees=False,
+                            slippage=slippage_excluded_for_paper_validation(),
+                            latency=latency_not_applicable("test"))
+        b.funding = funding_not_applicable("test")
+        # En CAPTURE_VALIDATION l'exclusion passe...
+        ev_val = evaluate(candidate(500.0), b, mode=EvaluationMode.CAPTURE_VALIDATION)
+        self.assertIs(ev_val.status, CaptureStatus.ACCEPTED)
+        # ...mais en EXECUTION elle est refusee.
+        ev_exec = evaluate(candidate(500.0), b, mode=EvaluationMode.EXECUTION)
+        self.assertIs(ev_exec.status, CaptureStatus.UNRESOLVED)
+        self.assertIn("EXECUTION_MODE_REQUIRES_OBSERVED", ev_exec.blocked_by)
+        self.assertTrue(any("slippage" in o for o in ev_exec.unresolved_components))
+
+    def test_execution_mode_refuses_assumed_fees(self):
+        """Les frais ASSUMED (bareme public) ne suffisent pas pour executer."""
+        from prism_v2.modes import EvaluationMode
+        b = breakdown()
+        b.fees = fees_assumed_public()
+        ev = evaluate(candidate(500.0), b, mode=EvaluationMode.EXECUTION)
+        self.assertIs(ev.status, CaptureStatus.UNRESOLVED)
+        self.assertTrue(any("fees" in o for o in ev.unresolved_components))
 
     def test_measured_components_resolve_the_breakdown(self):
         """Une economie ne devient resoluble que par la MESURE, pas par decret."""

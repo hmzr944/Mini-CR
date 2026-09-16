@@ -250,6 +250,31 @@ def slippage_unknown() -> CostComponent:
              "La simulation PAPER ne la mesure pas : elle l'ignore.")
 
 
+def slippage_excluded_for_paper_validation() -> CostComponent:
+    """EXCLUSION EXPLICITE du slippage, reservee a CAPTURE_VALIDATION.
+
+    Ce n'est PAS une mesure et ce n'est PAS "slippage = 0". C'est la
+    declaration qu'une simulation PAPER sur le carnet observe ne contient pas
+    cette friction, et que tout resultat qui en decoule est donc une BORNE
+    INFERIEURE DU COUT (donc une borne SUPERIEURE de la capture).
+
+    Interdit en EvaluationMode.EXECUTION : `evaluate(mode=EXECUTION)` refuse
+    toute composante portant `excluded=True`.
+    """
+    return CostComponent(
+        name="slippage", value_bps=0.0, quality=Quality.ASSUMED,
+        source="EXCLU de la simulation PAPER",
+        note="EXCLUSION, pas une mesure : la simulation PAPER calcule le fill "
+             "sur le carnet du meme instant et ne contient donc ni file "
+             "d'attente, ni derive decision->arrivee. Resultat = BORNE "
+             "INFERIEURE du cout reel. Interdit en mode EXECUTION.")
+
+
+def is_excluded(component: CostComponent) -> bool:
+    """Une composante 'exclue' porte une valeur de convention, pas une mesure."""
+    return component.source.startswith("EXCLU")
+
+
 def slippage_observed(value_bps: float, source: str, n: int) -> CostComponent:
     if n <= 0:
         raise ValueError("n doit etre > 0 pour une mesure OBSERVED")
@@ -318,6 +343,7 @@ def build_breakdown(book: OrderBook, side: str, notional_usd: float,
                     strict_fees: bool = True,
                     latency: Optional[CostComponent] = None,
                     funding: Optional[CostComponent] = None,
+                    slippage: Optional[CostComponent] = None,
                     legs: int = 2) -> CostBreakdown:
     """Assemble un CostBreakdown depuis un carnet reel.
 
@@ -336,5 +362,6 @@ def build_breakdown(book: OrderBook, side: str, notional_usd: float,
         adverse = adverse_selection_not_applicable()
     return CostBreakdown(
         fees=fees, spread=spread, impact=impact_from_book(book, side, notional_usd, legs=legs),
-        slippage=slippage_unknown(), funding=funding or funding_unknown(),
+        slippage=slippage or slippage_unknown(),
+        funding=funding or funding_unknown(),
         latency=latency or latency_unknown(), adverse_selection=adverse, style=style)

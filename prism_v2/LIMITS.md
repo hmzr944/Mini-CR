@@ -71,3 +71,44 @@ Laisser tourner le collecteur WebSocket plusieurs heures sur les 15 contrats
 inverses, puis rejouer M2 en mode **causal** (`replay.causal_capture`) sur cet
 échantillon. Cela donne un N exploitable et la première mesure non ex-post du
 mécanisme. Le code est déjà là ; il manque uniquement des données.
+
+---
+
+# Limites du Discovery Engine (ajout)
+
+## Venues
+
+| Venue | État depuis cet environnement |
+|---|---|
+| OKX | joignable (REST + WebSocket) |
+| Hyperliquid | joignable (REST POST), **délai de transport ~400–850 ms** |
+| Binance | **HTTP 451** — restriction géographique |
+| Bybit | **HTTP 403** |
+
+Le cross-venue se limite donc à OKX ↔ Hyperliquid. Le délai Hyperliquid est
+5 à 10× celui d'OKX : une comparaison à cette fraîcheur est structurellement
+fragile, et c'est inscrit dans chaque candidate.
+
+## Canaux L2 OKX
+
+| Canal | Accès | Niveaux | Checksum |
+|---|---|---|---|
+| `books` | public | 400, incrémental | **absent** (`checksum: 0`) |
+| `bbo-tbt` | public | 1, tick-by-tick | — |
+| `books-l2-tbt` | **refusé** (« Please log in ») | 400 @ 10 ms | oui |
+| `books50-l2-tbt` | **refusé** | 50 @ 10 ms | oui |
+
+Les canaux tick-by-tick exigent un niveau VIP. L'intégrité du carnet repose
+donc sur le **chaînage `prevSeqId`/`seqId` seul**. Le code vérifie le checksum
+dès qu'il est fourni ; il ne revendique pas une garantie qu'il n'a pas.
+
+## Ce que le Discovery Engine ne fait pas
+
+- **Pas de latence sub-100 ms mesurable** : la cadence de `books` la borne.
+- **Pas de maker réel** : `adverse_selection` reste `UNKNOWN`, donc les
+  familles exigeant `MAKER` ne peuvent pas franchir CAPTURE_VALIDATION.
+- **FORCED_FLOW dort le plus souvent** : les liquidations sont rares sur une
+  fenêtre de minutes. Ce n'est pas un défaut, c'est la nature de la famille.
+- **Le multi-leg n'est pas exécuté** : `CROSS_MARKET` et `CROSS_VENUE`
+  produisent des candidates à deux jambes, mais le PaperExecutor n'exécute
+  qu'une jambe. Le risque de jambe est **déclaré**, pas simulé.

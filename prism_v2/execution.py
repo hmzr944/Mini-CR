@@ -261,7 +261,11 @@ class PaperExecutor:
         entry = self.submit(spec, direction, entry_book, target_notional_usd)
         if entry.is_rejected:
             return None
-        ex = self.submit(spec, direction, exit_book, entry.filled_notional_usd, is_exit=True)
+        # On DEBOUCLE les contrats ouverts, on ne redimensionne pas depuis un
+        # notionnel : re-quantifier au prix de sortie laisserait un residu
+        # (defaut reel attrape par la garde de coherence du ledger).
+        exit_target = usd_notional(spec, entry.contracts, exit_book.mid)
+        ex = self.submit(spec, direction, exit_book, exit_target, is_exit=True)
         if ex.is_rejected or ex.exec_price is None or entry.exec_price is None:
             return None
 

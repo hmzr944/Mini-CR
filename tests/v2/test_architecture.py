@@ -282,6 +282,121 @@ class TestCoreIsDecoupledFromOpportunities(unittest.TestCase):
             OpportunityRegistry().register(object())
 
 
+class TestDiscoveryLayerIsPluggable(unittest.TestCase):
+    """Le noyau ne connait aucune famille concrete. Ajouter une famille ne
+    doit modifier aucun fichier hors de prism_v2/detectors/."""
+
+    CORE_PLUS = CORE_MODULES + ["discovery.py", "discovery_economics.py",
+                                "market_state.py", "router.py", "sizing.py",
+                                "discovery_memory.py", "modes.py", "l2book.py",
+                                "venues.py"]
+
+    def test_core_never_imports_a_concrete_detector(self):
+        offenders = []
+        for name in self.CORE_PLUS:
+            f = V2 / name
+            if not f.exists():
+                continue
+            for mod in imported_modules(f):
+                if "detectors" in mod:
+                    offenders.append(f"{name} -> {mod}")
+            for node in ast.walk(ast.parse(f.read_text(encoding="utf-8"))):
+                if isinstance(node, ast.ImportFrom):
+                    if (node.module and "detectors" in node.module) or \
+                            any(al.name == "detectors" for al in node.names):
+                        offenders.append(f"{name} -> detectors")
+        self.assertEqual(offenders, [],
+                         "le noyau connait un detecteur concret: " + "; ".join(offenders))
+
+    def test_new_family_needs_zero_core_change(self):
+        """Une famille inedite traverse detection -> economie -> sizing ->
+        router sans qu'une ligne du noyau change."""
+        from prism_v2.core_types import Direction, Provenance
+        from prism_v2.discovery import DetectionOutcome, Detector, DiscoveryEngine, Family
+        from prism_v2.discovery_economics import discover
+        from prism_v2.market_state import MarketStateTracker
+        from prism_v2.opportunity import Candidate
+        from prism_v2.router import CapitalRouter
+        from prism_v2.sizing import SizingLimits, recommend_size
+        from prism_v2.costs import build_breakdown
+        from tests.v2.fixtures import BTC_INVERSE, simple_inverse_book
+
+        class InventedFamilyDetector(Detector):
+            """Famille ecrite entierement dans ce test."""
+            family = Family.DEPTH_WITHDRAWAL
+
+            def detect(self, state):
+                return DetectionOutcome.ok(self.family, [Candidate(
+                    ts_utc="t", instrument=state.instrument,
+                    opportunity_type="INVENTED", family=self.family.value,
+                    candidate_id="inv-1", direction=Direction.LONG,
+                    gross_capture_bps=5_000.0,
+                    capacity_usd=state.depth_usd("ask"),
+                    provenance=Provenance("OKX", "/t", "t"),
+                    metadata={"invented_for": "architecture test"})])
+
+        tracker = MarketStateTracker()
+        tracker.on_book(simple_inverse_book())
+        engine = DiscoveryEngine([InventedFamilyDetector()])
+        outs = engine.scan(tracker.all_states())
+        cand = [c for o in outs for c in o.candidates][0]
+
+        book = simple_inverse_book()
+        costs = build_breakdown(book, "ask", 500.0, strict_fees=True)
+        res = discover(cand, costs, book)
+        self.assertIn(res.verdict.value,
+                      {"SURVIVES_ALL_BOUNDS", "NEEDS_MEASUREMENT",
+                       "DEAD_EVEN_AT_BEST", "NO_RAW_EDGE"})
+        sz = recommend_size(BTC_INVERSE, book, "ask", 5_000.0, 10.0,
+                            SizingLimits(available_capital_usd=100.0))
+        self.assertGreaterEqual(sz.recommended_notional_usd, 0.0)
+        self.assertIsNotNone(CapitalRouter().summary(
+            CapitalRouter().route([(cand, _dummy_eval(cand), sz)])))
+
+    def test_all_nine_families_are_registered(self):
+        from prism_v2.detectors import ALL_DETECTORS
+        from prism_v2.discovery import Family
+        families = {d.family for d in ALL_DETECTORS}
+        self.assertEqual(len(ALL_DETECTORS), 9)
+        self.assertEqual(families, set(Family))
+
+    def test_no_detector_claims_profitability(self):
+        """Un detecteur qui affirmerait la rentabilite serait un signal deguise."""
+        det_dir = V2 / "detectors"
+        for f in sorted(det_dir.rglob("*.py")):
+            idents = code_identifiers(f)
+            for bad in ("is_profitable", "expected_pnl", "win_rate", "edge_score",
+                        "profit_score", "should_trade"):
+                self.assertNotIn(bad, idents, f"{f.name} affirme la rentabilite")
+
+    def test_no_technical_indicators_in_detectors(self):
+        det_dir = V2 / "detectors"
+        offenders = []
+        for f in sorted(det_dir.rglob("*.py")):
+            found = banned_identifiers(code_identifiers(f))
+            if found:
+                offenders.append(f"{f.name}: {found}")
+        self.assertEqual(offenders, [], "; ".join(offenders))
+
+    def test_detectors_have_no_optimiser(self):
+        det_dir = V2 / "detectors"
+        for f in sorted(det_dir.rglob("*.py")):
+            idents = code_identifiers(f)
+            for bad in ("optimize", "optimise", "tune", "grid_search", "fit"):
+                self.assertNotIn(bad, idents, f"{f.name}: {bad}")
+
+
+def _dummy_eval(cand):
+    from prism_v2.costs import CostBreakdown, CostComponent, adverse_selection_not_applicable
+    from prism_v2.core_types import Quality
+    from prism_v2.economics import evaluate
+    k = lambda n, v: CostComponent(n, v, Quality.DERIVED, "test")
+    return evaluate(cand, CostBreakdown(
+        k("fees", 1), k("spread", 1), k("slippage", 0), k("impact", 1),
+        k("funding", 0), latency=k("latency", 0),
+        adverse_selection=adverse_selection_not_applicable()))
+
+
 class TestFinancialFunctionsRequireSpec(unittest.TestCase):
     def test_no_financial_function_accepts_a_bare_symbol(self):
         """Balayage : toute fonction publique de contracts.py refuse une chaine."""

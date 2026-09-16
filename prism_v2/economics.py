@@ -67,7 +67,8 @@ class Evaluation:
 def evaluate(candidate: Candidate, costs: CostBreakdown,
              required_notional_usd: Optional[float] = None,
              quality: Optional[Any] = None,
-             risk_decision: Optional[Any] = None) -> Evaluation:
+             risk_decision: Optional[Any] = None,
+             mode: Optional[Any] = None) -> Evaluation:
     """Confronte une capture brute aux couts reels. Aucun seuil arbitraire.
 
     Le seul seuil est `net <= 0`, qui n'est pas un reglage mais une identite
@@ -100,6 +101,34 @@ def evaluate(candidate: Candidate, costs: CostBreakdown,
             capacity_usd=candidate.capacity_usd,
             blocked_by="EX_POST_MEASUREMENT: borne superieure utilisant de "
                        "l'information future — mesure d'amplitude, non executable")
+
+    # ── 0bis. Exigence de qualite propre au MODE ──────────────────────────
+    # DISCOVERY tolere des bornes. CAPTURE_VALIDATION exige au moins DERIVED.
+    # EXECUTION exige OBSERVED et refuse toute composante EXCLUE : on
+    # n'engage pas de capital sur une friction qu'on a declaree absente.
+    if mode is not None:
+        from .costs import is_excluded
+        from .modes import EvaluationMode, quality_satisfies
+        if mode is EvaluationMode.EXECUTION:
+            offenders = []
+            names = costs.by_name()
+            for n in costs.essential_names():
+                comp = names.get(n)
+                if comp is None:
+                    continue
+                if is_excluded(comp):
+                    offenders.append(f"{n}(EXCLU)")
+                elif not quality_satisfies(comp.quality, Quality.OBSERVED):
+                    offenders.append(f"{n}({comp.quality.value})")
+            if offenders:
+                return Evaluation(
+                    status=CaptureStatus.UNRESOLVED,
+                    gross_capture_bps=candidate.gross_capture_bps,
+                    total_cost_bps=costs.total_bps(),
+                    expected_net_capture_bps=None,
+                    unresolved_components=offenders, weakest_quality=weakest,
+                    rejection_reason=None, capacity_usd=candidate.capacity_usd,
+                    blocked_by=f"EXECUTION_MODE_REQUIRES_OBSERVED: {offenders}")
 
     # ── 0. Qualite des donnees : AVANT toute economie ─────────────────────
     if quality is not None and not getattr(quality, "is_usable", True):
