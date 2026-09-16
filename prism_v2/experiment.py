@@ -256,6 +256,49 @@ def run_config(spec: InstrumentSpec, series: SnapshotSeries, lo: int, hi: int,
 
 
 
+#: Hypotheses de latence testees, en millisecondes. 0 est inclus NON parce
+#: qu'il serait realiste — il ne l'est pas — mais parce qu'il repond a une
+#: question decisive : si l'edge est absent meme a latence NULLE, alors aucune
+#: amelioration d'infrastructure ne le ferait apparaitre, et la latence n'est
+#: pas la contrainte mordante.
+LATENCY_GRID_MS = (0, 100, 250, 500, 1_000, 2_000)
+
+
+def transport_delay_stats(recs: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+    """Distribution du delai exchange -> local, mesuree sur les instantanes.
+
+    Ce n'est PAS la latence aller-retour d'un ordre, qui reste UNKNOWN sans
+    compte. C'est une borne INFERIEURE de ce qu'un ordre subirait.
+    """
+    ds = [r["recv"] - r["ts"] for r in recs
+          if r.get("recv") and r.get("ts") and r["recv"] >= r["ts"]]
+    if not ds:
+        return {"n": 0, "note": "aucun couple (horodatage exchange, reception)"}
+    ds.sort()
+    q = lambda f: ds[min(len(ds) - 1, int(f * (len(ds) - 1)))]   # noqa: E731
+    return {"n": len(ds), "min_ms": ds[0], "p50_ms": q(0.5), "p90_ms": q(0.9),
+            "p99_ms": q(0.99), "max_ms": ds[-1],
+            "note": ("delai de TRANSPORT exchange -> local, soumis a la derive "
+                     "d'horloge. Borne INFERIEURE de la latence d'un ordre "
+                     "reel, qui reste UNKNOWN sans compte.")}
+
+
+def latency_sensitivity(spec: InstrumentSpec, series: SnapshotSeries,
+                        lo: int, hi: int, lookback_ms: int, horizon_ms: int,
+                        threshold_spreads: float, bet: str,
+                        grid: Sequence[int] = LATENCY_GRID_MS
+                        ) -> List[Dict[str, Any]]:
+    """Le resultat depend-il de l'hypothese de latence ?"""
+    rows: List[Dict[str, Any]] = []
+    for lat in grid:
+        r = run_config(spec, series, lo, hi, lookback_ms, horizon_ms,
+                       threshold_spreads, "LATENCY", lat, bet=bet)
+        rows.append({"latency_ms": lat, "n_resolved": r.n_resolved,
+                     "mean_gross_bps": _stats(r.gross_bps)["mean"],
+                     "mean_net_bps": _stats(r.net_bps)["mean"]})
+    return rows
+
+
 #: Grille de notionnels sondee. Elle doit descendre assez bas pour que le
 #: carnet absorbe tout, et monter assez haut pour que l'impact morde.
 CAPACITY_GRID_USD = (10.0, 25.0, 50.0, 100.0, 250.0, 500.0, 1_000.0,
@@ -725,6 +768,39 @@ def run(obs_path: Path, latency_ms: int = DEFAULT_LATENCY_MS,
         print("aucune configuration de reference : capacite non sondee")
     report["capacity"] = {"rows": cap_rows,
                           "reference": cap_ref.key if cap_ref else None}
+
+    # ── 7quater. LATENCE ──────────────────────────────────────────────────
+    print(); print("=" * 84); print("7quater. SENSIBILITE A LA LATENCE")
+    print("=" * 84)
+    td = transport_delay_stats(recs)
+    if td.get("n"):
+        print(f"delai de transport observe : p50 {td['p50_ms']}ms | "
+              f"p90 {td['p90_ms']}ms | p99 {td['p99_ms']}ms (N={td['n']:,})")
+        print(f"  {td['note']}")
+    lat_rows: List[Dict[str, Any]] = []
+    if cap_ref is not None and cap_ref.inst_id in seriess:
+        lat_rows = latency_sensitivity(
+            specs_by_id[cap_ref.inst_id], seriess[cap_ref.inst_id],
+            disc_lo, disc_hi, cap_ref.lookback_ms, cap_ref.horizon_ms,
+            cap_ref.threshold_spreads, cap_ref.bet)
+        print(f"\n{'latence ms':>11}{'N':>7}{'brut_bps':>11}{'net_bps':>11}")
+        print("-" * 40)
+        for row in lat_rows:
+            g = ("n/a" if row["mean_gross_bps"] is None
+                 else f"{row['mean_gross_bps']:+.3f}")
+            n = ("n/a" if row["mean_net_bps"] is None
+                 else f"{row['mean_net_bps']:.3f}")
+            print(f"{row['latency_ms']:>11}{row['n_resolved']:>7}{g:>11}{n:>11}")
+        zero = next((r for r in lat_rows if r["latency_ms"] == 0), None)
+        if zero and zero["mean_net_bps"] is not None:
+            if zero["mean_net_bps"] <= 0:
+                print("\nA LATENCE NULLE le net reste negatif : la latence "
+                      "n'est PAS la contrainte mordante. Aucune amelioration "
+                      "d'infrastructure ne ferait apparaitre cet edge.")
+            else:
+                print("\nA latence nulle le net est positif : la latence EST "
+                      "la contrainte mordante pour cette configuration.")
+    report["latency"] = {"transport_delay": td, "sensitivity": lat_rows}
 
     # ── 8. ENTONNOIR : OU MEURT L'EDGE ────────────────────────────────────
     print(); print("=" * 84); print("8. OU MEURT L'EDGE"); print("=" * 84)

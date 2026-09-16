@@ -471,3 +471,36 @@ class TestCapacityIsProbedNotAssumed(unittest.TestCase):
         src = inspect.getsource(capacity_curve_for)
         self.assertIn("unmeasurable_share", src)
         self.assertIn("jamais extrapolee", src)
+
+
+class TestLatencyIsProbedNotAssumed(unittest.TestCase):
+
+    def test_grid_includes_zero_as_a_diagnostic(self):
+        """Zero n'est pas realiste : il repond a « la latence est-elle la
+        contrainte mordante ? ». Si le net reste negatif a latence nulle,
+        aucune amelioration d'infrastructure ne changerait le resultat."""
+        from prism_v2.experiment import LATENCY_GRID_MS
+        self.assertIn(0, LATENCY_GRID_MS)
+        self.assertGreaterEqual(max(LATENCY_GRID_MS), 1_000)
+
+    def test_transport_delay_is_not_called_order_latency(self):
+        from prism_v2.experiment import transport_delay_stats
+        recs = [{"ts": 1000 + i, "recv": 1000 + i + 90} for i in range(100)]
+        st = transport_delay_stats(recs)
+        self.assertEqual(st["p50_ms"], 90)
+        self.assertIn("UNKNOWN", st["note"])
+        self.assertIn("TRANSPORT", st["note"])
+
+    def test_transport_delay_refuses_when_no_pairs(self):
+        from prism_v2.experiment import transport_delay_stats
+        st = transport_delay_stats([{"ts": 1}, {"recv": 2}])
+        self.assertEqual(st["n"], 0)
+
+    def test_negative_delays_are_dropped_not_clamped(self):
+        """Un horodatage de reception anterieur a l'horodatage exchange est une
+        anomalie d'horloge : on l'ecarte, on ne le ramene pas a zero."""
+        from prism_v2.experiment import transport_delay_stats
+        recs = [{"ts": 1000, "recv": 900}] + [{"ts": 1000, "recv": 1090}] * 10
+        st = transport_delay_stats(recs)
+        self.assertEqual(st["n"], 10)
+        self.assertEqual(st["min_ms"], 90)
