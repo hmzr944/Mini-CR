@@ -43,3 +43,6 @@ prism_v2/ledger/discovery_memory.jsonl
 # Journal des decouvertes : sortie de run, regenere a chaque passage et
 # volumineux (plusieurs Mo). Le code qui le produit est versionne, pas lui.
 prism_v2/ledger/discoveries.jsonl
+# Observatoire : sortie de collecte, volumineuse et regeneree a chaque session.
+# Le code qui la produit et la relit est versionne, pas le flux lui-meme.
+prism_v2/data/observatory/

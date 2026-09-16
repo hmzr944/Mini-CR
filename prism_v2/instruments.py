@@ -132,6 +132,37 @@ class InstrumentSpec:
             raise InvalidInstrument(f"{self.inst_id or '<sans id>'}: " + "; ".join(errs))
         return self
 
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> "InstrumentSpec":
+        """Reconstruit un spec depuis sa forme serialisee, et le VALIDE.
+
+        Sert au replay : rejouer une collecte exige EXACTEMENT le spec sous
+        lequel elle a ete faite. Reconstruire un spec incoherent, ou tolerer
+        un champ manquant en lui donnant une valeur par defaut, ferait rejouer
+        un inverse avec la mecanique d'un lineaire — precisement ce que le
+        contrat d'instrument interdit. On leve plutot que de deviner.
+        """
+        missing = [k for k in ("inst_id", "inst_type", "ct_val", "ct_val_ccy",
+                               "ct_mult", "settle_ccy", "tick_size", "lot_size",
+                               "min_size", "state")
+                   if k not in d]
+        if missing:
+            raise InvalidInstrument(
+                f"{d.get('inst_id', '?')}: champs absents {missing} — "
+                "un spec incomplet ne peut pas etre reconstruit")
+        spec = cls(
+            inst_id=d["inst_id"], exchange=d.get("exchange", "OKX"),
+            inst_type=InstrumentType(d["inst_type"]), ct_type=d.get("ct_type", ""),
+            base=d.get("base", ""), quote=d.get("quote", ""),
+            settle_ccy=d["settle_ccy"], ct_val=float(d["ct_val"]),
+            ct_val_ccy=d["ct_val_ccy"], ct_mult=float(d["ct_mult"]),
+            tick_size=float(d["tick_size"]), lot_size=float(d["lot_size"]),
+            min_size=float(d["min_size"]), state=d["state"],
+            lever=float(d.get("lever", 0.0)), family=d.get("family", ""),
+            fetched_at=d.get("fetched_at", ""))
+        spec.validate()
+        return spec
+
     def to_dict(self, include_raw: bool = False) -> Dict[str, Any]:
         d = {
             "inst_id": self.inst_id, "exchange": self.exchange,
