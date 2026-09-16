@@ -874,6 +874,40 @@ class Test16DiscoveryOverfitting(unittest.TestCase):
             costs_applied=False, claims_profitability=True))
         self.assertIn(RejectionReason.TRANSACTION_COST_OMISSION, res.reasons)
 
+    def test_self_declared_untested_hypothesis_never_reaches_accepted(self):
+        """Defaut n8 (trouve a la cloture) : les detecteurs de microstructure
+        posent `hypothesis_untested: True` et personne ne lisait ce drapeau.
+        Une candidate se declarait non testee et recevait du capital dans le
+        meme run. Sa capture brute est le deplacement observe PRIS EN ENTIER :
+        elle suppose une convergence de 100% qui n'a jamais ete mesuree.
+        """
+        from prism_v2.economics import CaptureStatus, evaluate
+        from prism_v2.opportunity import Candidate
+        book = simple_inverse_book()
+        br = costs.build_breakdown(book, "ask", 1_000.0, strict_fees=False)
+        cand = Candidate(
+            ts_utc="2026-09-16T00:00:00Z", instrument=BTC_INVERSE,
+            opportunity_type="AGGRESSIVE_FLOW_DISPLACEMENT",
+            family="AGGRESSIVE_FLOW", candidate_id="c1",
+            direction=Direction.LONG,
+            gross_capture_bps=10_000.0,        # enorme : seul le drapeau bloque
+            capacity_usd=1e9,
+            provenance=Provenance("OKX", "books", "t", "BTC-USD-SWAP"),
+            metadata={"hypothesis_untested": True})
+        ev = evaluate(cand, br)
+        self.assertEqual(ev.status, CaptureStatus.UNRESOLVED)
+        self.assertIn("UNTESTED_HYPOTHESIS", ev.blocked_by)
+        self.assertIsNone(ev.expected_net_capture_bps)
+        self.assertIn("reversion_fraction", ev.unresolved_components)
+
+    def test_the_untested_flag_is_actually_set_by_the_detectors(self):
+        """Le garde ci-dessus ne vaut que si le drapeau est reellement pose."""
+        src = (V2 / "detectors" / "microstructure.py").read_text(encoding="utf-8")
+        self.assertIn('"hypothesis_untested": True', src)
+        # et reellement lu cote economie
+        eco = (V2 / "economics.py").read_text(encoding="utf-8")
+        self.assertIn('meta.get("hypothesis_untested")', eco)
+
     def test_discovery_and_holdout_do_not_overlap(self):
         from prism_v2.research.observation import ObservationLog
         log = ObservationLog()

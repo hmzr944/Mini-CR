@@ -102,6 +102,31 @@ def evaluate(candidate: Candidate, costs: CostBreakdown,
             blocked_by="EX_POST_MEASUREMENT: borne superieure utilisant de "
                        "l'information future — mesure d'amplitude, non executable")
 
+    # ── -1bis. Hypothese que le detecteur declare LUI-MEME non testee ─────
+    # Les detecteurs de microstructure posent `hypothesis_untested: True` :
+    # leur capture brute est le deplacement DEJA OBSERVE pris EN ENTIER, et
+    # la fraction reellement recuperee n'a jamais ete mesuree. Tant que ce
+    # drapeau n'etait lu par personne, une candidate pouvait se declarer non
+    # testee et recevoir du capital dans le meme run. Une capture supposant
+    # une convergence de 100% est un MAJORANT, donc UNRESOLVED : c'est au
+    # laboratoire PAPER causal d'en mesurer la fraction realisee.
+    #
+    # Ce blocage ne s'applique PAS au raisonnement par bornes du mode
+    # DISCOVERY (discovery_economics), qui est de la recherche et non un
+    # engagement de capital.
+    if meta.get("hypothesis_untested"):
+        return Evaluation(
+            status=CaptureStatus.UNRESOLVED,
+            gross_capture_bps=candidate.gross_capture_bps,
+            total_cost_bps=costs.total_bps(), expected_net_capture_bps=None,
+            unresolved_components=["reversion_fraction"] + unresolved,
+            weakest_quality=weakest, rejection_reason=None,
+            capacity_usd=candidate.capacity_usd,
+            blocked_by="UNTESTED_HYPOTHESIS: la capture brute est le "
+                       "deplacement observe PRIS EN ENTIER ; la fraction "
+                       "reellement recuperee n'est pas mesuree. Replay causal "
+                       "(PAPER) requis avant tout engagement de capital.")
+
     # ── 0bis. Exigence de qualite propre au MODE ──────────────────────────
     # DISCOVERY tolere des bornes. CAPTURE_VALIDATION exige au moins DERIVED.
     # EXECUTION exige OBSERVED et refuse toute composante EXCLUE : on
