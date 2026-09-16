@@ -161,3 +161,31 @@ class TestObservatoryRefusesBadInput(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestReconnectCounterIsHonest(unittest.TestCase):
+    """La collecte a rapporte « reconnexions: 0 » avec une deconnexion au
+    journal des erreurs. Un compteur qui dit toujours zero ne mesure rien."""
+
+    def test_reconnects_are_counted_in_the_error_path(self):
+        src = OBS_SRC.read_text(encoding="utf-8")
+        tree = ast.parse(src)
+        fn = next(n for n in ast.walk(tree)
+                  if isinstance(n, ast.FunctionDef) and n.name == "run")
+        handlers = [h for h in ast.walk(fn) if isinstance(h, ast.ExceptHandler)]
+        counted = any(
+            isinstance(n, ast.AugAssign) and isinstance(n.target, ast.Attribute)
+            and n.target.attr == "reconnects"
+            for h in handlers for n in ast.walk(h))
+        self.assertTrue(counted,
+                        "les reconnexions doivent etre comptees la ou la "
+                        "connexion est perdue, pas la ou elle est retablie")
+
+    def test_reconnect_is_not_counted_where_client_was_just_cleared(self):
+        """Le defaut exact : tester `client is not None` au moment de
+        reconnecter, apres l'avoir mis a None, ne se declenche jamais."""
+        src = OBS_SRC.read_text(encoding="utf-8")
+        self.assertNotIn(
+            "if client is None or not client.is_connected:\n"
+            "                            if client is not None:\n"
+            "                                stats.reconnects += 1", src)

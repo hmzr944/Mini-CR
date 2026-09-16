@@ -149,8 +149,6 @@ class MarketObservatory:
                 while time.monotonic() < deadline and not self._stop:
                     try:
                         if client is None or not client.is_connected:
-                            if client is not None:
-                                stats.reconnects += 1
                             client = connect_okx_public(timeout=20.0)
                             client.send_json({"op": "subscribe",
                                               "args": self._args(instruments)})
@@ -166,6 +164,13 @@ class MarketObservatory:
                         # fichier muet sans que rien ne le signale. Les carnets
                         # deviennent invalides et sont ecrits comme tels.
                         stats.errors.append(f"{type(exc).__name__}: {exc}"[:200])
+                        # Compter ICI, et non a la reconnexion : le chemin
+                        # d'erreur remet `client` a None, si bien qu'un test
+                        # `client is not None` au moment de reconnecter ne se
+                        # declenchait jamais. Le compteur affichait 0 alors que
+                        # des deconnexions avaient eu lieu.
+                        if client is not None:
+                            stats.reconnects += 1
                         client = None
                         time.sleep(min(backoff, self.max_backoff_s))
                         backoff = min(backoff * 2, self.max_backoff_s)
