@@ -112,3 +112,57 @@ dès qu'il est fourni ; il ne revendique pas une garantie qu'il n'a pas.
 - **Le multi-leg n'est pas exécuté** : `CROSS_MARKET` et `CROSS_VENUE`
   produisent des candidates à deux jambes, mais le PaperExecutor n'exécute
   qu'une jambe. Le risque de jambe est **déclaré**, pas simulé.
+
+---
+
+# Limites de la couche RECHERCHE (V3)
+
+## Ce que la falsification contrôle — et ce qu'elle ne peut pas contrôler
+
+18 contrôles sont exercés (`research/falsification.py`). Cinq d'entre eux ne
+mordent que si l'appelant **déclare** l'information correspondante ; en son
+absence le contrôle est marqué `NON EXERCE` dans les `details` et n'est
+**jamais** compté comme un succès :
+
+| Contrôle | Exige | Sans cette donnée |
+|---|---|---|
+| `effect_below_spread` | `typical_spread_bps` | non exercé |
+| `duplicate_liquidity` | `depth_sources` | non exercé |
+| `unrealistic_fill` | `touch_depth_usd` | non exercé |
+| `out_of_sample_stability` | `holdout_relation` | non exercé |
+| `stale_quotes` | `book_age_ms` | non exercé |
+
+Une hypothèse peut donc atteindre `SURVIVED_FALSIFICATION` en ayant échappé à
+un contrôle faute de donnée. **Survivre n'est pas être vrai** : c'est n'avoir
+pas été réfuté par les contrôles réellement exerçables.
+
+## Ce que le PAPER ne mesure pas
+
+`PAPER_EXCLUDED_FRICTIONS` nomme 5 frictions non simulables (probabilité de
+fill maker, position dans la file, adverse selection réelle, latence
+aller-retour d'un ordre réel, rejets/re-soumissions). Tout résultat PAPER est
+une **borne supérieure**.
+
+## Aller-retour sur un seul carnet
+
+Boucler entrée et sortie sur le **même** carnet donne un brut nul par
+construction et un réalisé égal à moins le péage. C'est une mesure de
+**plancher de coût**, jamais une capture. Un test architectural
+(`test_round_trip_never_closes_on_its_own_entry_book`) interdit ce motif
+partout sauf dans `smoke_test.py`, où il est explicitement étiqueté
+`EXECUTION_CONTROL_PAPER` avec `gross = 0`.
+
+## Candidates à deux jambes
+
+`PaperExecutor` est **mono-instrument**. Une candidate `TAKER_BOTH_LEGS`
+(CROSS_MARKET, CROSS_VENUE) n'est pas exécutée en PAPER : n'en simuler qu'une
+jambe produirait le PnL d'une position inexistante. Ces familles restent donc
+mesurées mais **jamais exécutées**, y compris en PAPER.
+
+## Frais
+
+Aucun instrument ne dispose de frais `OBSERVED` : cela exige
+`GET /api/v5/account/trade-fee`, endpoint **authentifié**, absent de V2 par
+construction. `EvaluationMode.EXECUTION` est donc structurellement bloqué.
+Les frais `ASSUMED` (barème public Lv1) n'autorisent jamais un engagement de
+capital.

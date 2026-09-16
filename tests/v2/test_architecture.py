@@ -289,7 +289,17 @@ class TestDiscoveryLayerIsPluggable(unittest.TestCase):
     CORE_PLUS = CORE_MODULES + ["discovery.py", "discovery_economics.py",
                                 "market_state.py", "router.py", "sizing.py",
                                 "discovery_memory.py", "modes.py", "l2book.py",
-                                "venues.py"]
+                                "venues.py", "fees.py", "paper_lab.py",
+                                "research/observation.py", "research/hypothesis.py",
+                                "research/falsification.py", "research/agents.py",
+                                "research/orchestrator.py", "research/pipeline.py",
+                                "research/discovery_ledger.py"]
+
+    def test_every_guarded_module_actually_exists(self):
+        """Un nom mal orthographie serait saute en silence : la garde ne
+        protegerait plus rien tout en restant verte."""
+        missing = [n for n in self.CORE_PLUS if not (V2 / n).exists()]
+        self.assertEqual(missing, [], f"modules gardes introuvables: {missing}")
 
     def test_core_never_imports_a_concrete_detector(self):
         offenders = []

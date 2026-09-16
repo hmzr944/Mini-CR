@@ -77,6 +77,12 @@ from prism_v2.risk import RiskGate, RiskLimits
 from prism_v2.router import CapitalRouter, RoutingDecision
 from prism_v2.sizing import SizingLimits, recommend_size
 from prism_v2.venues import HyperliquidAdapter, OKXVenueAdapter, VenueRegistry
+from prism_v2.fees import (
+    AssumedFeeProvider, FeeBook, NoCredentialsFeeProvider, RealisedFeeProvider,
+)
+from prism_v2.paper_lab import PaperLab, summarise as summarise_paper
+from prism_v2.replay import EventTimeline
+from prism_v2.research.pipeline import ResearchPipeline
 from prism_v2.ws_collector import EventCollector, load_events
 
 PROBE_NOTIONAL_USD = 1_000.0
@@ -249,6 +255,8 @@ def run(duration_s: float = 180.0, max_instruments: int = 6,
         raise SystemExit("aucun evenement horodate collecte")
     t_start, t_end = min(ts_list), max(ts_list)
     l2 = L2BookSet(specs=specs)
+    pipeline = ResearchPipeline(sampling_step_ms=SCAN_STEP_MS)
+    mids_by_inst: Dict[str, Dict[int, float]] = {}
     cursor, scans, all_candidates = 0, 0, []
     scan_ts = t_start + 5_000        # laisse l'historique se remplir
     t_scan0 = time.perf_counter()
@@ -257,6 +265,13 @@ def run(duration_s: float = 180.0, max_instruments: int = 6,
         states = tracker.all_states(now_ms=scan_ts)
         if states:
             scans += 1
+            # AGENT 1 — observation pure, avant toute detection de famille.
+            pipeline.observe(states)
+            for iid, st in states.items():
+                try:
+                    mids_by_inst.setdefault(iid, {})[scan_ts] = st.mid
+                except Exception:
+                    pass
             for out in engine.scan(states):
                 all_candidates.extend(out.candidates)
         scan_ts += SCAN_STEP_MS
@@ -271,6 +286,124 @@ def run(duration_s: float = 180.0, max_instruments: int = 6,
           f"{gaps} trou(s) de sequence, "
           f"checksum disponible={any(v['checksum_available'] for v in l2stats.values())}")
     report["l2_books"] = l2stats
+
+    # ── 3bis. RECHERCHE MULTI-AGENT ────────────────────────────────────────
+    _hr("3bis. RECHERCHE MULTI-AGENT — observation -> hypothese -> falsification")
+    fee_book = (FeeBook().add(NoCredentialsFeeProvider())
+                .add(AssumedFeeProvider()).add(RealisedFeeProvider()))
+    fee_status = fee_book.status(probes)
+    print(f"frais: {fee_status['by_quality']} | execution autorisee: "
+          f"{fee_status['execution_authorised']}")
+    if fee_status["blocker"]:
+        print(f"  BLOQUEUR: {fee_status['blocker'][:150]}")
+    report["fees"] = fee_status
+
+    states_now = tracker.all_states(now_ms=t_end)
+    typical_spreads: Dict[str, float] = {}
+    for iid, st in states_now.items():
+        try:
+            typical_spreads[iid] = st.spread_bps
+        except Exception:
+            pass
+    best_fee = fee_book.best_for(probes[0])
+    td_median = (cstats.transport_delay_summary() or {}).get("median_ms")
+
+    pres = pipeline.analyse(
+        mids_by_inst=mids_by_inst, states_now=states_now,
+        fee_bps=best_fee.round_trip_bps(), fee_quality=best_fee.quality.value,
+        notional_usd=PROBE_NOTIONAL_USD, transport_delay_ms=td_median,
+        typical_spreads=typical_spreads)
+
+    funnel = pres.funnel()
+    print(f"\n{'etage':<34}{'compte':>10}")
+    print("-" * 46)
+    for k, v in funnel.items():
+        print(f"{k:<34}{v:>10}")
+    acct = pipeline.registry.accounting.to_dict()
+    print(f"\ntests multiples: {acct['n_tests']} relations testees | "
+          f"seuil BH: {acct['benjamini_hochberg_threshold']} | "
+          f"survivent BH: {acct['n_surviving_bh']}")
+    print(f"  {acct['note']}")
+
+    rej = Counter()
+    for fres in pres.falsifications.values():
+        for r in fres.reasons:
+            rej[r.value] += 1
+    if rej:
+        print(f"\nraisons de rejet (red team):")
+        for reason, n in rej.most_common(8):
+            print(f"  {reason:<28}{n:>7}")
+    print(f"\nlatence du pipeline: {pres.timing.to_dict()}")
+    report["research"] = {
+        "funnel": funnel, "multiple_testing": acct,
+        "rejection_reasons": dict(rej.most_common()),
+        "timing_ms": pres.timing.to_dict(),
+        "split_ts_ms": pres.split_ts_ms,
+        "observations": pipeline.log.summary(),
+        "registry_funnel": pipeline.registry.funnel(),
+        "discovery_ledger": pipeline.ledger.summary(),
+    }
+
+    # ── 3ter. PAPER CAUSAL sur les survivants ──────────────────────────────
+    _hr("3ter. LABORATOIRE PAPER CAUSAL (survivants de la falsification)")
+    paper_results = []
+    if pres.survivors:
+        lab = PaperLab()
+        lat_ms = int(td_median or 100)
+        for h in pres.survivors[:40]:
+            spec = specs.get(h.relation.inst_id)
+            tl = EventTimeline.from_events(spec, events, channel="books") if spec else None
+            if spec is None or tl is None or len(tl) < 10:
+                continue
+            direction = (Direction.LONG if h.relation.excess_bps > 0
+                         else Direction.SHORT)
+            start = (tl.first_ts_ms or 0) + 5_000
+            step = max(SCAN_STEP_MS, h.relation.horizon_ms // 4)
+            t = start
+            while t + lat_ms + h.relation.horizon_ms <= (tl.last_ts_ms or 0):
+                paper_results.append(lab.run(
+                    tl, spec, direction, decision_ts_ms=t, latency_ms=lat_ms,
+                    horizon_ms=h.relation.horizon_ms,
+                    notional_usd=PROBE_NOTIONAL_USD,
+                    theoretical_edge_bps=abs(h.relation.excess_bps),
+                    fee_bps=best_fee.round_trip_bps(),
+                    fee_quality=best_fee.quality.value))
+                t += step
+        psum = summarise_paper(paper_results)
+        print(f"experiences: {psum['n_experiments']} | completees: "
+              f"{psum['n_completed']}")
+        print(f"issues: {psum['by_outcome']}")
+        for label, key in (("EDGE THEORIQUE", "theoretical_edge_bps"),
+                           ("EDGE CAUSAL", "causal_edge_bps"),
+                           ("EDGE EXECUTABLE", "executable_edge_bps"),
+                           ("PAPER PnL (bps)", "paper_pnl_bps")):
+            d = psum[key]
+            if d.get("n"):
+                print(f"  {label:<18} N={d['n']:<5} p50={d['median']:>9.4f} "
+                      f"p05={d['p05']:>9.4f} p95={d['p95']:>9.4f}")
+            else:
+                print(f"  {label:<18} non calculable ({d.get('note', 'aucune')})")
+        print(f"  PnL PAPER total: {psum['paper_pnl_usd_total']:.4f} USD | "
+              f"fills partiels: {psum['n_partial_fills']} | "
+              f"non deboucles: {psum['n_not_fully_closed']}")
+        print(f"  {psum['interpretation']}")
+        report["paper_lab"] = psum
+    else:
+        print("aucune hypothese n'a survecu a la falsification : aucune "
+              "experience PAPER causale n'est justifiee.")
+        print("Ce n'est pas une panne — c'est le red team qui fait son travail.")
+        report["paper_lab"] = {"n_experiments": 0,
+                               "reason": "aucun survivant de la falsification"}
+
+    prio = pipeline.orchestrator.reprioritise()
+    print(f"\npriorite de RECHERCHE par primitive (PRIORITY != CAPITAL):")
+    for k, v in list(prio.items())[:8]:
+        print(f"  {k:<32}{v:>7.3f}")
+    print("\nprochaines cibles de recherche:")
+    for t_ in pipeline.orchestrator.next_research_targets(5):
+        print(f"  {t_['key']:<30} {t_['why'][:58]}")
+        print(f"  {'':<30} -> {t_['recommended_action'][:58]}")
+    report["research_orchestrator"] = pipeline.orchestrator.report()
 
     # ── 4. CROSS-VENUE (REST, echantillons simultanes) ─────────────────────
     _hr("4. CROSS-VENUE (prix EXECUTABLES, pas des tickers)")
@@ -472,25 +605,101 @@ def run(duration_s: float = 180.0, max_instruments: int = 6,
                   f"  {(r.sizing.binding_constraint if r.sizing else '-'):<24}")
     report["routing"] = {"summary": rsum, "rows": [r.to_dict() for r in routed[:60]]}
 
+    # L'aller-retour PAPER doit etre CAUSAL : entree sur le carnet reellement
+    # disponible a T0+latence, sortie sur celui de T0+latence+horizon. Boucler
+    # entree et sortie sur le MEME carnet donnerait un brut nul par
+    # construction et un realise egal a moins le cout de traversee : un
+    # PLANCHER DE COUT, que sa juxtaposition avec la capture nette attendue
+    # ferait lire comme une refutation de l'edge. Faute de carnet de sortie,
+    # on n'execute rien plutot que de produire ce chiffre trompeur.
+    lat_exec_ms = int(td_median or 100)
+    tl_cache: Dict[str, Any] = {}
+
+    def _timeline(inst_id: str):
+        if inst_id not in tl_cache:
+            sp = specs.get(inst_id)
+            tl_cache[inst_id] = (EventTimeline.from_events(sp, events,
+                                                           channel="books")
+                                 if sp is not None else None)
+        return tl_cache[inst_id]
+
+    lab_exec = PaperLab(executor)
     n_paper = 0
+    paper_skipped: Dict[str, int] = {}
+    causal_experiments = []
     for r in allocated:
-        book = books_now.get(r.candidate.instrument.inst_id)
-        if book is None or r.allocated_usd <= 0:
+        cand = r.candidate
+        if r.allocated_usd <= 0:
+            paper_skipped["aucun capital alloue"] = \
+                paper_skipped.get("aucun capital alloue", 0) + 1
             continue
-        rt = executor.round_trip(r.candidate.instrument, r.candidate.direction,
-                                 book, book, r.allocated_usd)
+        # Une candidate a DEUX JAMBES ne peut pas etre executee par un
+        # executeur mono-instrument : n'en simuler qu'une produirait le PnL
+        # d'une position qui n'a jamais existe, et laisserait l'autre jambe
+        # comme une exposition muette.
+        if len(cand.legs or ()) > 1 or (cand.required_execution or "").endswith(
+                "BOTH_LEGS"):
+            paper_skipped["candidate a deux jambes : executeur mono-instrument"] = \
+                paper_skipped.get(
+                    "candidate a deux jambes : executeur mono-instrument", 0) + 1
+            continue
+        tl = _timeline(cand.instrument.inst_id)
+        t0 = cand.causal_reference_ts_ms
+        horizon = cand.expected_horizon_ms
+        if tl is None or t0 is None or horizon is None:
+            paper_skipped["pas de reference causale exploitable"] = \
+                paper_skipped.get("pas de reference causale exploitable", 0) + 1
+            continue
+        entry_ts = t0 + lat_exec_ms
+        exit_ts = entry_ts + horizon
+        entry_book = tl.book_at(entry_ts)
+        exit_book = tl.book_at(exit_ts)
+        if not tl.covers(exit_ts) or entry_book is None or exit_book is None:
+            paper_skipped["fenetre collectee ne couvre pas la sortie"] = \
+                paper_skipped.get("fenetre collectee ne couvre pas la sortie", 0) + 1
+            continue
+        rt = executor.round_trip(cand.instrument, cand.direction,
+                                 entry_book, exit_book, r.allocated_usd)
         if rt is None:
+            paper_skipped["profondeur insuffisante"] = \
+                paper_skipped.get("profondeur insuffisante", 0) + 1
             continue
         n_paper += 1
-        rec = reconcile(r.candidate, r.evaluation, rt.entry, rt)
-        ledger.record(r.candidate, r.evaluation, costs=None, fill=rt.entry,
+        causal_experiments.append(lab_exec.run(
+            tl, cand.instrument, cand.direction, decision_ts_ms=t0,
+            latency_ms=lat_exec_ms, horizon_ms=horizon,
+            notional_usd=r.allocated_usd,
+            theoretical_edge_bps=r.evaluation.expected_net_capture_bps,
+            fee_bps=best_fee.round_trip_bps(),
+            fee_quality=best_fee.quality.value))
+        rec = reconcile(cand, r.evaluation, rt.entry, rt)
+        ledger.record(cand, r.evaluation, costs=None, fill=rt.entry,
                       round_trip=rt, reconciliation=rec, run_id=run_id,
                       measurement_mode=measurement_modes.get(
-                          r.candidate.candidate_id,
-                          MeasurementMode.EVENT_REPLAY.value),
-                      notes=(f"famille {r.candidate.family}; router rang {r.rank}; "
-                             "slippage reel EXCLU (borne superieure de capture)"))
-    print(f"\nallers-retours PAPER executes: {n_paper}")
+                          cand.candidate_id, MeasurementMode.EVENT_REPLAY.value),
+                      notes=(f"famille {cand.family}; router rang {r.rank}; "
+                             f"aller-retour CAUSAL: entree T0+{lat_exec_ms}ms, "
+                             f"sortie +{horizon}ms; slippage reel EXCLU "
+                             "(borne superieure de capture)"))
+    print(f"\nallers-retours PAPER CAUSAUX executes: {n_paper}")
+    if paper_skipped:
+        print("non executes (aucun chiffre fabrique a la place) :")
+        for why, n in sorted(paper_skipped.items(), key=lambda kv: -kv[1]):
+            print(f"  {n:>4}  {why}")
+    if causal_experiments:
+        csum = summarise_paper(causal_experiments)
+        print(f"\nedges separes sur ces {csum['n_completed']} experiences "
+              "completees :")
+        for k in ("theoretical_edge_bps", "causal_edge_bps",
+                  "executable_edge_bps", "paper_pnl_bps"):
+            v = csum.get(k)
+            if isinstance(v, dict) and v.get("n"):
+                print(f"  {k:<24} n={v['n']:<5} median={_f(v.get('median'))} "
+                      f"p05={_f(v.get('p05'))} p95={_f(v.get('p95'))}")
+            else:
+                print(f"  {k:<24} non mesurable")
+        report["paper_execution_causal"] = csum
+    report["paper_execution_skipped"] = paper_skipped
 
     # ── 7. PRIORITES + MEMOIRE ─────────────────────────────────────────────
     _hr("7. PRIORITE DE RECHERCHE / MEMOIRE / SANTE")

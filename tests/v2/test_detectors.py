@@ -32,7 +32,16 @@ BTC_SPOT_EUR = InstrumentSpec(
     fetched_at="t")
 
 
-def book(spec, bid, ask, bid_sz=100.0, ask_sz=100.0, ts=T0, seq=1) -> OrderBook:
+#: Taille par defaut des carnets de test. Elle doit PORTER le notionnel de
+#: sonde des detecteurs (1 000 USD) : depuis que `vwap_for_notional` refuse de
+#: donner un prix pour une taille que le carnet n'absorbe pas, un carnet plus
+#: mince ferait echouer la detection pour cause de profondeur, pas de mesure.
+#: Pour un lineaire a 110 USD, 100 contrats ne valent que 110 USD.
+DEFAULT_TEST_SIZE = 2_000.0
+
+
+def book(spec, bid, ask, bid_sz=DEFAULT_TEST_SIZE, ask_sz=DEFAULT_TEST_SIZE,
+         ts=T0, seq=1) -> OrderBook:
     return OrderBook.from_okx(
         spec, okx_book_payload([[str(bid), str(bid_sz)]], [[str(ask), str(ask_sz)]],
                                ts=str(ts)), PROV)

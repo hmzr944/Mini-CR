@@ -40,3 +40,6 @@ prism_v2/data/l2_snapshots/
 prism_v2/data/instruments_*.json
 prism_v2/data/events/
 prism_v2/ledger/discovery_memory.jsonl
+# Journal des decouvertes : sortie de run, regenere a chaque passage et
+# volumineux (plusieurs Mo). Le code qui le produit est versionne, pas lui.
+prism_v2/ledger/discoveries.jsonl

@@ -33,6 +33,14 @@ class FailureReason(str, enum.Enum):
     INSTRUMENT_MISMATCH = "INSTRUMENT_MISMATCH"
     RISK_BLOCKED = "RISK_BLOCKED"
     DATA_QUALITY = "DATA_QUALITY"
+    # ── causes issues de la couche de RECHERCHE ──────────────────────────
+    FEES = "FEES"
+    SPREAD = "SPREAD"
+    IMPACT = "IMPACT"
+    LOOKAHEAD = "LOOKAHEAD"
+    DATA_LEAKAGE = "DATA_LEAKAGE"
+    DENOMINATION_ERROR = "DENOMINATION_ERROR"
+    MULTIPLE_TESTING = "MULTIPLE_TESTING"
     UNKNOWN = "UNKNOWN"
 
     @property
@@ -45,6 +53,15 @@ class FailureReason(str, enum.Enum):
         return self in (FailureReason.INSUFFICIENT_DATA, FailureReason.STALE_BOOK,
                         FailureReason.DATA_QUALITY, FailureReason.INSTRUMENT_MISMATCH,
                         FailureReason.UNKNOWN)
+
+    @property
+    def is_methodological(self) -> bool:
+        """Faute de METHODE, distincte d'une absence d'edge et d'un manque de
+        donnee. Une hypothese tuee pour look-ahead ne dit rien du marche :
+        elle dit que la mesure etait fausse."""
+        return self in (FailureReason.LOOKAHEAD, FailureReason.DATA_LEAKAGE,
+                        FailureReason.DENOMINATION_ERROR,
+                        FailureReason.MULTIPLE_TESTING)
 
 
 def classify(record: Dict[str, Any]) -> FailureReason:
@@ -122,6 +139,31 @@ class FailureMemory:
     def dominant(self) -> Optional[str]:
         return self.counts.most_common(1)[0][0] if self.counts else None
 
+    def three_way_split(self) -> Dict[str, Any]:
+        """Repartition en TROIS causes, pas deux. La distinction decide de
+        l'action : collecter, corriger la methode, ou abandonner la piste."""
+        data = meth = econ = 0
+        for r, n in self.counts.items():
+            reason = FailureReason(r)
+            if reason.is_methodological:
+                meth += n
+            elif reason.is_data_problem:
+                data += n
+            else:
+                econ += n
+        if self.total == 0:
+            verdict = "aucune observation"
+        elif meth >= max(data, econ):
+            verdict = ("fautes de METHODE dominantes — corriger la mesure avant "
+                       "toute conclusion sur le marche")
+        elif data > econ:
+            verdict = "collecte insuffisante — aucune conclusion economique"
+        else:
+            verdict = "rejets majoritairement economiques"
+        return {"data_problems": data, "methodological_errors": meth,
+                "economic_rejections": econ, "total": self.total,
+                "verdict": verdict}
+
     def data_vs_economics(self) -> Dict[str, Any]:
         """Repartition entre "on n'a pas pu mesurer" et "l'economie ne passe pas".
 
@@ -143,4 +185,5 @@ class FailureMemory:
                 "dominant": self.dominant(),
                 "by_instrument": {k: dict(v) for k, v in sorted(self.by_instrument.items())},
                 "by_opportunity": {k: dict(v) for k, v in sorted(self.by_opportunity.items())},
-                "data_vs_economics": self.data_vs_economics()}
+                "data_vs_economics": self.data_vs_economics(),
+                "three_way_split": self.three_way_split()}

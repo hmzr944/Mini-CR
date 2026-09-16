@@ -228,7 +228,11 @@ def impact_from_book(book: OrderBook, side: str, notional_usd: float,
             "impact", source=f"{book.provenance.endpoint} @ {book.ts_utc}",
             note=(f"profondeur insuffisante pour ${notional_usd:,.0f} "
                   f"(rempli {walk.fill_ratio:.1%}) — impact non mesurable"))
-    per_leg = book.slippage_vs_touch_bps(side, notional_usd) or 0.0
+    per_leg = book.slippage_vs_touch_bps(side, notional_usd)
+    if per_leg is None:          # ne peut survenir qu'apres la garde ci-dessus
+        return CostComponent.unknown(
+            "impact", source=f"{book.provenance.endpoint} @ {book.ts_utc}",
+            note="impact non mesurable sur ce carnet")
     return CostComponent(name="impact", value_bps=per_leg * legs, quality=Quality.DERIVED,
                          source=f"{book.provenance.endpoint} @ {book.ts_utc}",
                          note=f"{per_leg:.4f}bps/jambe sur {walk.levels_consumed} niveaux x {legs}")

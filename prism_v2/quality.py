@@ -48,6 +48,11 @@ BLOCKING_ISSUES = frozenset({
     QualityIssue.INSTRUMENT_MISMATCH, QualityIssue.INVALID_CONTRACT_METADATA,
     QualityIssue.MALFORMED_EVENT, QualityIssue.MISSING_TIMESTAMP,
     QualityIssue.TIMESTAMP_INVERSION,
+    # Un horodatage dans le futur au-dela de la derive toleree casse la
+    # relation entre l'horloge de l'exchange et la notre : l'age du carnet,
+    # et donc TOUTE mesure de fraicheur ou de latence, devient indeterminable.
+    # FAIL CLOSED : on ne peut pas juger un carnet dont on ne sait pas l'age.
+    QualityIssue.CLOCK_ANOMALY,
 })
 
 

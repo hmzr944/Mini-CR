@@ -230,23 +230,35 @@ class OrderBook:
                         worst_price=worst)
 
     def vwap_for_notional(self, side: str, notional_usd: float) -> Optional[float]:
-        return self.walk(side, notional_usd).vwap
+        """VWAP d'execution pour CE notionnel, ou None s'il n'est pas atteignable.
+
+        Un carnet epuise ne donne PAS de prix : le VWAP de la portion
+        realisable repondrait a une autre question que celle posee, et le
+        chiffre serait lu comme le prix du notionnel demande. `walk()` reste
+        disponible pour qui veut le detail du remplissage partiel.
+        """
+        walk = self.walk(side, notional_usd)
+        return None if walk.exhausted else walk.vwap
 
     def market_impact_bps(self, side: str, notional_usd: float) -> Optional[float]:
         """Cout total de traversee depuis le mid (spread + impact), en bps.
 
         Instrument-correct : denominateur = VWAP d'execution (cf module).
-        None si aucun fill n'est possible.
+        None si le carnet ne porte pas ce notionnel : un cout mesure sur une
+        fraction serait une SOUS-ESTIMATION presentee comme une mesure.
         """
         walk = self.walk(side, notional_usd)
-        if walk.vwap is None:
+        if walk.vwap is None or walk.exhausted:
             return None
         return cost_bps(walk.vwap, self.mid, side)
 
     def slippage_vs_touch_bps(self, side: str, notional_usd: float) -> Optional[float]:
-        """Degradation au-dela du meilleur prix affiche (impact pur, hors spread)."""
+        """Degradation au-dela du meilleur prix affiche (impact pur, hors spread).
+
+        None si le carnet ne porte pas ce notionnel (meme raison que ci-dessus).
+        """
         walk = self.walk(side, notional_usd)
-        if walk.vwap is None:
+        if walk.vwap is None or walk.exhausted:
             return None
         touch = self.best_ask if side == "ask" else self.best_bid
         return cost_bps(walk.vwap, touch, side)
