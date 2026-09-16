@@ -131,6 +131,10 @@ class ConfigResult:
     #: serait impossible et « ca marche en moyenne » resterait indiscutable.
     event_spread_bps: List[float] = field(default_factory=list)
     event_displacement_bps: List[float] = field(default_factory=list)
+    #: Couts par evenement, conserves separement pour pouvoir substituer un
+    #: poste (frais) sans reexecuter la mesure.
+    cost_spread_bps: List[float] = field(default_factory=list)
+    cost_impact_bps: List[float] = field(default_factory=list)
     refusals: Dict[str, int] = field(default_factory=dict)
 
     @property
@@ -250,10 +254,42 @@ def run_config(spec: InstrumentSpec, series: SnapshotSeries, lo: int, hi: int,
         res.event_spread_bps.append(m.spread_at_entry_bps or 0.0)
         res.event_displacement_bps.append(abs(m.observed_move_bps))
         res.gross_bps.append(m.recoverable_bps)
+        res.cost_spread_bps.append(spread_cost)
+        res.cost_impact_bps.append(impact)
         res.net_bps.append(net)
         res.fractions.append(m.capture_fraction)
     return res
 
+
+
+#: Hypotheses de frais testees, en bps PAR JAMBE. 0 est inclus pour la meme
+#: raison que la latence nulle : si le net reste negatif meme SANS FRAIS,
+#: alors obtenir des frais OBSERVED — le blocage principal du projet — ne
+#: changerait pas le verdict, et l'effort doit aller ailleurs.
+#: 5.0 est le bareme public OKX Lv1 taker, le tier le plus cher des standards.
+FEE_GRID_BPS_PER_LEG = (0.0, 1.0, 2.0, 3.5, 5.0)
+
+
+def fee_sensitivity(gross_bps: Sequence[float], spread_bps: Sequence[float],
+                    impact_bps: Sequence[float],
+                    grid: Sequence[float] = FEE_GRID_BPS_PER_LEG
+                    ) -> List[Dict[str, Any]]:
+    """Net moyen en fonction du tarif, sur les MEMES evenements.
+
+    Le calcul est exact : net = brut - spread - impact - 2 x frais. On ne
+    reexecute rien, on substitue seulement le poste dont on teste la valeur.
+    """
+    if not gross_bps:
+        return []
+    n = len(gross_bps)
+    base = [g - sp - im for g, sp, im in zip(gross_bps, spread_bps, impact_bps)]
+    mean_base = sum(base) / n
+    rows = []
+    for fee in grid:
+        net = mean_base - 2.0 * fee
+        rows.append({"fee_bps_per_leg": fee, "round_trip_fee_bps": 2.0 * fee,
+                     "mean_net_bps": net, "n": n})
+    return rows
 
 
 #: Hypotheses de latence testees, en millisecondes. 0 est inclus NON parce
@@ -801,6 +837,38 @@ def run(obs_path: Path, latency_ms: int = DEFAULT_LATENCY_MS,
                 print("\nA latence nulle le net est positif : la latence EST "
                       "la contrainte mordante pour cette configuration.")
     report["latency"] = {"transport_delay": td, "sensitivity": lat_rows}
+
+    # ── 7quinquies. FRAIS ─────────────────────────────────────────────────
+    print(); print("=" * 84); print("7quinquies. SENSIBILITE AUX FRAIS")
+    print("=" * 84)
+    seen_fee: set = set()
+    fg, fs, fi = [], [], []
+    for r in discovery.values():
+        for ts, g, sp, im in zip(r.event_ts, r.gross_bps, r.cost_spread_bps,
+                                 r.cost_impact_bps):
+            k = (r.inst_id, ts, r.bet)
+            if k in seen_fee:
+                continue
+            seen_fee.add(k)
+            fg.append(g); fs.append(sp); fi.append(im)
+    fee_rows = fee_sensitivity(fg, fs, fi)
+    if fee_rows:
+        print(f"sur {fee_rows[0]['n']:,} evenements uniques")
+        print(f"{'frais/jambe':>12}{'AR frais':>10}{'net_bps':>11}")
+        print("-" * 34)
+        for row in fee_rows:
+            print(f"{row['fee_bps_per_leg']:>12.1f}"
+                  f"{row['round_trip_fee_bps']:>10.1f}"
+                  f"{row['mean_net_bps']:>11.3f}")
+        zero_fee = fee_rows[0]["mean_net_bps"]
+        if zero_fee <= 0:
+            print(f"\nMEME SANS AUCUN FRAIS le net reste {zero_fee:+.3f} bps. "
+                  "Obtenir des frais OBSERVED — le blocage principal du projet "
+                  "— ne changerait donc PAS le verdict.")
+        else:
+            print(f"\nSans frais le net serait {zero_fee:+.3f} bps : le tarif "
+                  "EST la contrainte mordante.")
+    report["fee_sensitivity"] = fee_rows
 
     # ── 8. ENTONNOIR : OU MEURT L'EDGE ────────────────────────────────────
     print(); print("=" * 84); print("8. OU MEURT L'EDGE"); print("=" * 84)

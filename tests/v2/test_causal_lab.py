@@ -504,3 +504,29 @@ class TestLatencyIsProbedNotAssumed(unittest.TestCase):
         st = transport_delay_stats(recs)
         self.assertEqual(st["n"], 10)
         self.assertEqual(st["min_ms"], 90)
+
+
+class TestFeeSensitivityIsExactNotResimulated(unittest.TestCase):
+
+    def test_zero_fee_row_isolates_the_spread_and_impact_floor(self):
+        from prism_v2.experiment import fee_sensitivity
+        rows = fee_sensitivity([1.0, 1.0], [0.4, 0.4], [0.1, 0.1],
+                               grid=(0.0, 5.0))
+        self.assertAlmostEqual(rows[0]["mean_net_bps"], 0.5, places=9)
+        self.assertAlmostEqual(rows[1]["mean_net_bps"], 0.5 - 10.0, places=9)
+
+    def test_grid_includes_zero_and_the_public_tier(self):
+        from prism_v2.experiment import FEE_BPS_PER_LEG, FEE_GRID_BPS_PER_LEG
+        self.assertIn(0.0, FEE_GRID_BPS_PER_LEG)
+        self.assertIn(FEE_BPS_PER_LEG, FEE_GRID_BPS_PER_LEG)
+
+    def test_empty_input_yields_no_rows_rather_than_zeros(self):
+        from prism_v2.experiment import fee_sensitivity
+        self.assertEqual(fee_sensitivity([], [], []), [])
+
+    def test_costs_are_kept_per_event_for_substitution(self):
+        from prism_v2.experiment import ConfigResult
+        r = ConfigResult(inst_id="X", lookback_ms=1, horizon_ms=1,
+                         threshold_spreads=1.0, split="D")
+        for f in ("cost_spread_bps", "cost_impact_bps"):
+            self.assertIn(f, r.__dataclass_fields__)
