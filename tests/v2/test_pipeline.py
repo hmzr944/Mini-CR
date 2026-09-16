@@ -8,7 +8,10 @@ from pathlib import Path
 from tests.v2.fixtures import BTC_INVERSE, simple_inverse_book, thin_inverse_book
 from prism_v2.capacity import capacity_curve, max_notional_without_exhaustion
 from prism_v2.core_types import Direction, ExecutionMode, Provenance, Quality
-from prism_v2.costs import CostBreakdown, CostComponent, fees_unknown
+from prism_v2.costs import (
+    CostBreakdown, CostComponent, adverse_selection_not_applicable, fees_unknown,
+    latency_unknown,
+)
 from prism_v2.economics import CaptureStatus, evaluate
 from prism_v2.execution import PaperExecutor
 from prism_v2.ledger import CaptureLedger, SecretInLedger
@@ -27,8 +30,11 @@ def known(name, v):
 
 
 def cheap_costs():
+    """Toutes composantes essentielles connues (latency incluse depuis P3)."""
     return CostBreakdown(known("fees", 1), known("spread", 1), known("slippage", 0),
-                         known("impact", 1), known("funding", 0))
+                         known("impact", 1), known("funding", 0),
+                         latency=known("latency", 0),
+                         adverse_selection=adverse_selection_not_applicable())
 
 
 def candidate(gross=500.0, capacity=1e9):
@@ -200,7 +206,9 @@ class TestPaperExecution(unittest.TestCase):
 class TestReconciliation(unittest.TestCase):
     def test_not_executed_when_unresolved(self):
         b = CostBreakdown(fees_unknown(), known("spread", 1), known("slippage", 1),
-                          known("impact", 1), known("funding", 0))
+                          known("impact", 1), known("funding", 0),
+                          latency=latency_unknown(),
+                          adverse_selection=adverse_selection_not_applicable())
         ev = evaluate(candidate(), b)
         r = reconcile(candidate(), ev, None)
         self.assertIs(r.cause, DiscrepancyCause.NOT_EXECUTED_UNRESOLVED)
@@ -255,7 +263,9 @@ class TestLedger(unittest.TestCase):
 
     def test_unresolved_writes_null_costs_not_zero(self):
         b = CostBreakdown(fees_unknown(), known("spread", 1), known("slippage", 1),
-                          known("impact", 1), known("funding", 0))
+                          known("impact", 1), known("funding", 0),
+                          latency=latency_unknown(),
+                          adverse_selection=adverse_selection_not_applicable())
         c = candidate()
         ev = evaluate(c, b)
         self.ledger.record(c, ev, costs=b)

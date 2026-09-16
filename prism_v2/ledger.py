@@ -31,8 +31,11 @@ DEFAULT_LEDGER_PATH = Path(__file__).parent / "ledger" / "captures.jsonl"
 REQUIRED_FIELDS = (
     "schema_version", "ts_utc", "inst_id", "inst_type", "opportunity_type",
     "gross_capture_bps", "fees_bps", "spread_bps", "impact_bps", "slippage_bps",
-    "funding_bps", "capacity_usd", "expected_net_capture_bps", "status",
+    "funding_bps", "latency_bps", "adverse_selection_bps",
+    "capacity_usd", "expected_net_capture_bps", "status",
     "rejection_reason", "execution_mode", "realized_pnl_usd", "provenance",
+    "measurement_mode", "data_quality", "failure_reason", "decision",
+    "decision_reason", "engine_version", "instrument_registry_version",
 )
 
 #: Motifs interdits : garde anti-fuite de secret au moment de l'ecriture.
@@ -76,6 +79,36 @@ def _cost_quality(costs: Optional[Any], name: str) -> Optional[str]:
     return None
 
 
+class LedgerInconsistency(ValueError):
+    """Le ledger affirmerait quelque chose que l'execution ne montre pas."""
+
+
+def _assert_execution_consistent(rec: Dict[str, Any]) -> None:
+    """Un ledger ne doit jamais affirmer un fill que le cycle de vie infirme.
+
+    C'est la garde qui empeche la divergence silencieuse entre ce que le
+    systeme CROIT avoir fait et ce qu'il a fait.
+    """
+    executed = bool(rec.get("executed"))
+    state = rec.get("order_state")
+    if executed and state not in ("FILLED", "PARTIALLY_FILLED"):
+        raise LedgerInconsistency(
+            f"executed=True mais order_state={state!r} : aucun fill ne l'etablit")
+    if not executed and state in ("FILLED", "PARTIALLY_FILLED"):
+        raise LedgerInconsistency(
+            f"executed=False mais order_state={state!r} : fill non comptabilise")
+    if rec.get("realized_pnl_usd") is not None and not executed:
+        raise LedgerInconsistency(
+            "realized_pnl_usd renseigne sans execution correspondante")
+    rt = rec.get("round_trip") or {}
+    if rt and not rt.get("fully_closed", True):
+        if rec.get("failure_reason") is None and rec.get("status") == "ACCEPTED":
+            raise LedgerInconsistency(
+                f"exposition residuelle non debouclee "
+                f"({rt.get('unclosed_contracts')} contrats) presentee comme un "
+                "aller-retour complet")
+
+
 @dataclass
 class CaptureLedger:
     path: Path = field(default_factory=lambda: DEFAULT_LEDGER_PATH)
@@ -91,7 +124,14 @@ class CaptureLedger:
                round_trip: Optional[PaperRoundTrip] = None,
                reconciliation: Optional[Reconciliation] = None,
                run_id: Optional[str] = None,
-               notes: str = "") -> Dict[str, Any]:
+               notes: str = "",
+               *, measurement_mode: str = "LIVE_PAPER",
+               data_quality: Optional[Dict[str, Any]] = None,
+               market_state: Optional[Dict[str, Any]] = None,
+               risk: Optional[Dict[str, Any]] = None,
+               registry_version: Optional[str] = None,
+               correlation_id: Optional[str] = None,
+               event_id: Optional[str] = None) -> Dict[str, Any]:
         """Construit et persiste l'enregistrement d'une opportunite.
 
         Les couts UNKNOWN sont ecrits `null`, jamais 0, et leur qualite est
@@ -123,16 +163,30 @@ class CaptureLedger:
             "impact_bps": _cost_value(costs, "impact"),
             "slippage_bps": _cost_value(costs, "slippage"),
             "funding_bps": _cost_value(costs, "funding"),
+            "latency_bps": _cost_value(costs, "latency"),
+            "adverse_selection_bps": _cost_value(costs, "adverse_selection"),
+            "execution_style": getattr(getattr(costs, "style", None), "value", None),
             "total_cost_bps": evaluation.total_cost_bps,
             "cost_quality": {n: _cost_quality(costs, n) for n in
-                             ("fees", "spread", "impact", "slippage", "funding")},
+                             ("fees", "spread", "impact", "slippage", "funding",
+                              "latency", "adverse_selection")},
             "weakest_quality": evaluation.weakest_quality.value,
             "unresolved_components": evaluation.unresolved_components,
             # ── economie
             "capacity_usd": candidate.capacity_usd,
             "expected_net_capture_bps": evaluation.expected_net_capture_bps,
             "status": evaluation.status.value,
+            "decision": evaluation.status.value,
+            "decision_reason": (evaluation.rejection_reason or evaluation.blocked_by
+                                or "economie resolue et positive"
+                                if evaluation.status.value == "ACCEPTED"
+                                else evaluation.rejection_reason or evaluation.blocked_by
+                                or f"non resolu: {evaluation.unresolved_components}"),
             "rejection_reason": evaluation.rejection_reason,
+            "blocked_by": evaluation.blocked_by,
+            "risk_blocked": bool(evaluation.blocked_by
+                                 and str(evaluation.blocked_by).startswith("RISK")),
+            "approved_notional_usd": evaluation.approved_notional_usd,
             # ── execution (PAPER uniquement)
             "execution_mode": fill.mode if fill else ExecutionMode.PAPER.value,
             "executed": fill is not None and not fill.is_rejected,
@@ -147,10 +201,29 @@ class CaptureLedger:
             "metadata": candidate.metadata,
             "provenance": candidate.provenance.to_dict(),
             "notes": notes,
+            # ── contexte de mesure : sans lui un chiffre n'est pas interpretable
+            "measurement_mode": measurement_mode,
+            "data_quality": data_quality,
+            "market_state": market_state,
+            "risk": risk,
+            "instrument_registry_version": registry_version or spec.fetched_at,
+            "model_version": f"{__version__}/schema{SCHEMA_VERSION}",
+            "correlation_id": correlation_id,
+            "event_id": event_id,
+            "sequence_id": (fill.metadata.get("seq_id") if fill and fill.metadata
+                            else None),
+            "order_state": fill.state if fill else None,
+            "order_lifecycle": fill.lifecycle if fill else None,
         }
+        # Cause d'echec imputee a l'ecriture : le ledger porte le POURQUOI,
+        # pas seulement le QUOI.
+        from .failure_memory import classify as _classify
+        rec["failure_reason"] = (None if rec["status"] == "ACCEPTED"
+                                 else _classify(rec).value)
         missing = [f for f in REQUIRED_FIELDS if f not in rec]
         if missing:
             raise ValueError(f"enregistrement incomplet, champs manquants: {missing}")
+        _assert_execution_consistent(rec)
         _assert_no_secrets(rec)
         self._append(rec)
         return rec

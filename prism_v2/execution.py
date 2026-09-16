@@ -13,14 +13,108 @@ l'InstrumentSpec : le PnL d'un inverse utilise la formule en 1/prix.
 """
 from __future__ import annotations
 
+import enum
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from .contracts import OKX_LV1_TAKER_RATE, build_order, fee, pnl, usd_notional
+import uuid
+
 from .core_types import Direction, ExecutionMode, utc_now_iso
 from .instruments import InstrumentSpec
 from .opportunity import Candidate
 from .orderbook import OrderBook
+
+
+class OrderState(str, enum.Enum):
+    """Etats d'un ordre. Un ordre n'est FILLED que si un fill l'etablit.
+
+    L'intention de remplir n'est pas un remplissage : c'est la confusion qui
+    fait diverger un ledger de la realite. UNKNOWN existe pour les cas ou
+    l'etat n'a pas pu etre etabli — il ne doit jamais etre suppose FILLED.
+    """
+
+    CREATED = "CREATED"
+    SUBMITTED = "SUBMITTED"
+    PARTIALLY_FILLED = "PARTIALLY_FILLED"
+    FILLED = "FILLED"
+    CANCELLED = "CANCELLED"
+    REJECTED = "REJECTED"
+    EXPIRED = "EXPIRED"
+    UNKNOWN = "UNKNOWN"
+
+    @property
+    def is_terminal(self) -> bool:
+        return self in (OrderState.FILLED, OrderState.CANCELLED,
+                        OrderState.REJECTED, OrderState.EXPIRED)
+
+    @property
+    def has_exposure(self) -> bool:
+        return self in (OrderState.PARTIALLY_FILLED, OrderState.FILLED)
+
+
+#: Transitions autorisees. Toute autre transition leve : un ordre ne saute
+#: jamais de CREATED a FILLED sans passer par SUBMITTED.
+ALLOWED_TRANSITIONS: Dict[OrderState, frozenset] = {
+    OrderState.CREATED: frozenset({OrderState.SUBMITTED, OrderState.REJECTED,
+                                   OrderState.CANCELLED}),
+    OrderState.SUBMITTED: frozenset({OrderState.PARTIALLY_FILLED, OrderState.FILLED,
+                                     OrderState.CANCELLED, OrderState.REJECTED,
+                                     OrderState.EXPIRED, OrderState.UNKNOWN}),
+    OrderState.PARTIALLY_FILLED: frozenset({OrderState.PARTIALLY_FILLED, OrderState.FILLED,
+                                            OrderState.CANCELLED, OrderState.EXPIRED,
+                                            OrderState.UNKNOWN}),
+    OrderState.FILLED: frozenset(),
+    OrderState.CANCELLED: frozenset(),
+    OrderState.REJECTED: frozenset(),
+    OrderState.EXPIRED: frozenset(),
+    OrderState.UNKNOWN: frozenset({OrderState.PARTIALLY_FILLED, OrderState.FILLED,
+                                   OrderState.CANCELLED, OrderState.REJECTED}),
+}
+
+
+class IllegalTransition(RuntimeError):
+    """Transition d'etat interdite : incoherence d'execution, FAIL CLOSED."""
+
+
+@dataclass
+class OrderLifecycle:
+    """Journal des transitions d'un ordre. Meme en PAPER.
+
+    Sert a la reconciliation : un ledger qui affirme FILLED alors que le
+    cycle de vie ne montre aucun fill est une incoherence detectable.
+    """
+
+    order_id: str
+    inst_id: str
+    state: OrderState = OrderState.CREATED
+    transitions: List[Dict[str, Any]] = field(default_factory=list)
+    filled_notional_usd: float = 0.0
+    requested_notional_usd: float = 0.0
+
+    def transition(self, new_state: OrderState, reason: str = "",
+                   filled_usd: Optional[float] = None) -> None:
+        if new_state not in ALLOWED_TRANSITIONS[self.state]:
+            raise IllegalTransition(
+                f"{self.order_id}: {self.state.value} -> {new_state.value} interdit")
+        self.transitions.append({"from": self.state.value, "to": new_state.value,
+                                 "reason": reason, "ts_utc": utc_now_iso()})
+        self.state = new_state
+        if filled_usd is not None:
+            self.filled_notional_usd = filled_usd
+
+    @property
+    def fill_ratio(self) -> float:
+        if self.requested_notional_usd <= 0:
+            return 0.0
+        return self.filled_notional_usd / self.requested_notional_usd
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"order_id": self.order_id, "inst_id": self.inst_id,
+                "state": self.state.value, "transitions": self.transitions,
+                "requested_notional_usd": self.requested_notional_usd,
+                "filled_notional_usd": self.filled_notional_usd,
+                "fill_ratio": self.fill_ratio}
 
 
 @dataclass(frozen=True)
@@ -44,6 +138,8 @@ class PaperFill:
     fee_usd: float
     fee_bps: float
     slippage_vs_mid_bps: Optional[float]
+    state: str = OrderState.UNKNOWN.value
+    lifecycle: Optional[Dict[str, Any]] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -60,6 +156,9 @@ class PaperRoundTrip:
     realized_bps: float             # net de frais, en bps du notionnel USD d'entree
     gross_bps: float                # avant frais
     total_fee_bps: float
+    unclosed_contracts: float = 0.0        # exposition residuelle non debouclee
+    unclosed_notional_usd: float = 0.0
+    fully_closed: bool = True
 
     def to_dict(self) -> Dict[str, Any]:
         return {"entry": self.entry.to_dict(), "exit": self.exit.to_dict(),
@@ -67,7 +166,10 @@ class PaperRoundTrip:
                 "settle_ccy": self.settle_ccy,
                 "realized_pnl_usd": self.realized_pnl_usd,
                 "realized_bps": self.realized_bps, "gross_bps": self.gross_bps,
-                "total_fee_bps": self.total_fee_bps}
+                "total_fee_bps": self.total_fee_bps,
+                "unclosed_contracts": self.unclosed_contracts,
+                "unclosed_notional_usd": self.unclosed_notional_usd,
+                "fully_closed": self.fully_closed}
 
 
 class PaperExecutor:
@@ -84,6 +186,10 @@ class PaperExecutor:
                target_notional_usd: float, *, is_exit: bool = False) -> PaperFill:
         """Soumet un ordre marche simule et marche le carnet."""
         spec.validate()
+        lifecycle = OrderLifecycle(
+            order_id=f"paper-{uuid.uuid4().hex[:12]}", inst_id=spec.inst_id,
+            requested_notional_usd=target_notional_usd)
+        lifecycle.transition(OrderState.SUBMITTED, "soumission simulee")
         # A l'entree un LONG lifte les asks ; a la sortie il frappe les bids.
         if is_exit:
             side = "bid" if direction is Direction.LONG else "ask"
@@ -93,16 +199,23 @@ class PaperExecutor:
         walk = book.walk(side, target_notional_usd)
 
         if walk.vwap is None or walk.filled_notional <= 0:
+            lifecycle.transition(OrderState.REJECTED, "aucune liquidite")
             return self._rejected(spec, direction, target_notional_usd, mid,
-                                  "carnet vide ou aucune liquidite disponible")
+                                  "carnet vide ou aucune liquidite disponible", lifecycle)
 
         order = build_order(spec, walk.filled_notional, walk.vwap)
         if not order.is_executable:
-            return self._rejected(spec, direction, target_notional_usd, mid, order.reason)
+            lifecycle.transition(OrderState.REJECTED, order.reason)
+            return self._rejected(spec, direction, target_notional_usd, mid,
+                                  order.reason, lifecycle)
 
         filled_usd = usd_notional(spec, order.contracts, walk.vwap)
         f = fee(spec, order.contracts, walk.vwap, self.fee_rate)
         slip = book.market_impact_bps(side, walk.filled_notional)
+        partial = walk.is_partial or order.residual_usd > 1e-9
+        lifecycle.transition(
+            OrderState.PARTIALLY_FILLED if partial else OrderState.FILLED,
+            f"fill simule sur carnet {book.ts_utc}", filled_usd=filled_usd)
 
         return PaperFill(
             mode=self.mode.value, ts_utc=utc_now_iso(), inst_id=spec.inst_id,
@@ -110,8 +223,8 @@ class PaperExecutor:
             submitted_notional_usd=target_notional_usd,
             filled_notional_usd=filled_usd, contracts=order.contracts,
             exec_price=walk.vwap, reference_price=mid,
-            is_partial=walk.is_partial or order.residual_usd > 1e-9,
-            is_rejected=False, reject_reason="",
+            is_partial=partial, is_rejected=False, reject_reason="",
+            state=lifecycle.state.value, lifecycle=lifecycle.to_dict(),
             levels_consumed=walk.levels_consumed,
             fee_settle_ccy=f.fee_settle_ccy, settle_ccy=spec.settle_ccy,
             fee_usd=f.fee_usd, fee_bps=f.fee_bps_of_usd_notional,
@@ -125,7 +238,8 @@ class PaperExecutor:
         )
 
     def _rejected(self, spec: InstrumentSpec, direction: Direction,
-                  target: float, mid: float, reason: str) -> PaperFill:
+                  target: float, mid: float, reason: str,
+                  lifecycle: Optional[OrderLifecycle] = None) -> PaperFill:
         return PaperFill(
             mode=self.mode.value, ts_utc=utc_now_iso(), inst_id=spec.inst_id,
             inst_type=spec.inst_type.value, direction=direction.value,
@@ -133,7 +247,8 @@ class PaperExecutor:
             exec_price=None, reference_price=mid, is_partial=False, is_rejected=True,
             reject_reason=reason, levels_consumed=0, fee_settle_ccy=0.0,
             settle_ccy=spec.settle_ccy, fee_usd=0.0, fee_bps=0.0,
-            slippage_vs_mid_bps=None)
+            slippage_vs_mid_bps=None, state=OrderState.REJECTED.value,
+            lifecycle=lifecycle.to_dict() if lifecycle else None)
 
     def round_trip(self, spec: InstrumentSpec, direction: Direction,
                    entry_book: OrderBook, exit_book: OrderBook,
@@ -150,7 +265,13 @@ class PaperExecutor:
         if ex.is_rejected or ex.exec_price is None or entry.exec_price is None:
             return None
 
+        # Si la sortie remplit moins que l'entree, une exposition SUBSISTE.
+        # La passer sous silence produirait un PnL qui ne correspond a aucune
+        # position reelle : on la calcule et on la RAPPORTE.
         contracts = min(entry.contracts, ex.contracts)
+        unclosed = max(0.0, entry.contracts - ex.contracts)
+        unclosed_usd = (usd_notional(spec, unclosed, ex.exec_price)
+                        if unclosed > 0 else 0.0)
         p = pnl(spec, direction, contracts, entry.exec_price, ex.exec_price)
         notion_in = usd_notional(spec, contracts, entry.exec_price)
         fees_usd = entry.fee_usd + ex.fee_usd
@@ -165,4 +286,6 @@ class PaperExecutor:
             settle_ccy=spec.settle_ccy,
             realized_pnl_usd=net_usd,
             realized_bps=net_usd / notion_in * 10_000.0 if notion_in else 0.0,
-            gross_bps=p.return_bps_usd, total_fee_bps=fee_bps)
+            gross_bps=p.return_bps_usd, total_fee_bps=fee_bps,
+            unclosed_contracts=unclosed, unclosed_notional_usd=unclosed_usd,
+            fully_closed=unclosed <= 1e-12)

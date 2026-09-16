@@ -98,11 +98,30 @@ class OrderBook:
     provenance: Provenance
     seq_id: Optional[str] = None
     raw_depth: int = 0
+    ts_ms: Optional[int] = None          # horodatage exchange, en ms epoch
+    local_recv_ts_ms: Optional[int] = None  # horodatage de reception locale
+
+    # ---- fraicheur -----------------------------------------------------------
+    def age_ms(self, now_ms: int) -> Optional[int]:
+        """Age du carnet. `now_ms` est fourni par l'appelant : une fonction qui
+        lit l'horloge n'est pas testable de maniere deterministe."""
+        if self.ts_ms is None:
+            return None
+        return now_ms - self.ts_ms
+
+    @property
+    def transport_delay_ms(self) -> Optional[int]:
+        """Delai apparent exchange -> reception locale. Soumis a la derive des
+        horloges : ce n'est PAS la latence d'un aller-retour d'ordre."""
+        if self.ts_ms is None or self.local_recv_ts_ms is None:
+            return None
+        return self.local_recv_ts_ms - self.ts_ms
 
     # ---- construction --------------------------------------------------------
     @classmethod
     def from_okx(cls, instrument: InstrumentSpec, payload: Sequence[Dict[str, Any]],
-                 provenance: Provenance) -> "OrderBook":
+                 provenance: Provenance,
+                 local_recv_ts_ms: Optional[int] = None) -> "OrderBook":
         if not payload:
             raise EmptyBook(f"payload vide pour {getattr(instrument, 'inst_id', instrument)}")
         instrument.validate()
@@ -120,11 +139,18 @@ class OrderBook:
         bids = sorted(build(row.get("bids", [])), key=lambda l: -l.price)
         asks = sorted(build(row.get("asks", [])), key=lambda l: l.price)
         ts = row.get("ts")
+        ts_ms = None
+        if ts is not None:
+            try:
+                ts_ms = int(ts)
+            except (TypeError, ValueError):
+                ts_ms = None
         return cls(instrument=instrument, bids=bids, asks=asks,
-                   ts_utc=ms_to_iso(ts) if ts else utc_now_iso(),
+                   ts_utc=ms_to_iso(ts_ms) if ts_ms else utc_now_iso(),
                    provenance=provenance,
                    seq_id=str(row["seqId"]) if row.get("seqId") is not None else None,
-                   raw_depth=max(len(bids), len(asks)))
+                   raw_depth=max(len(bids), len(asks)),
+                   ts_ms=ts_ms, local_recv_ts_ms=local_recv_ts_ms)
 
     # ---- descripteurs de marche ---------------------------------------------
     def _require_both(self) -> None:
@@ -234,9 +260,57 @@ class OrderBook:
             "ct_mult": self.instrument.ct_mult, "settle_ccy": self.instrument.settle_ccy,
             "seq_id": self.seq_id, "mid": self.mid,
             "best_bid": self.best_bid, "best_ask": self.best_ask,
-            "spread_bps": self.spread_bps,
+            "spread_bps": self.spread_bps, "ts_ms": self.ts_ms,
+            "local_recv_ts_ms": self.local_recv_ts_ms,
+            "transport_delay_ms": self.transport_delay_ms,
             "bid_depth_usd": self.bid_depth(), "ask_depth_usd": self.ask_depth(),
             "bids": [[l.price, l.size, l.notional_usd] for l in self.bids[:levels]],
             "asks": [[l.price, l.size, l.notional_usd] for l in self.asks[:levels]],
             "provenance": self.provenance.to_dict(),
         }
+
+
+def book_from_snapshot(snapshot: Dict[str, Any], instrument: InstrumentSpec) -> OrderBook:
+    """Reconstruit un OrderBook depuis un snapshot JSONL collecte.
+
+    Les niveaux sont relus tels qu'enregistres (prix, taille native, notionnel
+    deja converti) : on ne recalcule pas le notionnel pour ne pas masquer une
+    eventuelle divergence de metadonnees entre collecte et replay. Si l'instId
+    du snapshot ne correspond pas au spec, on leve — jamais de substitution.
+    """
+    if snapshot.get("inst_id") != instrument.inst_id:
+        raise ValueError(f"snapshot {snapshot.get('inst_id')!r} != spec "
+                         f"{instrument.inst_id!r} — substitution interdite")
+    prov = Provenance(**snapshot["provenance"]) if snapshot.get("provenance") else \
+        Provenance("OKX", "replay", snapshot.get("ts_utc", ""), instrument.inst_id)
+    # Le notionnel stocke est RECALCULE depuis le spec courant et compare :
+    # si les metadonnees de contrat ont change entre collecte et replay
+    # (ctVal, ctMult, ct_type), rejouer sur l'ancien notionnel produirait des
+    # couts faux en silence. FAIL CLOSED.
+    from .contracts import usd_notional as _usd
+
+    def mk(rows: Sequence[Sequence[float]]) -> List[Level]:
+        out: List[Level] = []
+        for r in rows:
+            px, sz = float(r[0]), float(r[1])
+            recomputed = _usd(instrument, sz, px)
+            if len(r) > 2 and r[2] is not None:
+                stored = float(r[2])
+                if stored > 0 and abs(stored - recomputed) / stored > 1e-6:
+                    raise ValueError(
+                        f"{instrument.inst_id}: notionnel du snapshot {stored} != "
+                        f"recalcul {recomputed} (ctVal={instrument.ct_val}, "
+                        f"ctMult={instrument.ct_mult}, ct_type={instrument.ct_type!r}). "
+                        "Metadonnees de contrat divergentes — replay refuse.")
+            out.append(Level(px, sz, recomputed))
+        return out
+
+    bids, asks = mk(snapshot.get("bids", [])), mk(snapshot.get("asks", []))
+    return OrderBook(instrument=instrument,
+                     bids=sorted(bids, key=lambda l: -l.price),
+                     asks=sorted(asks, key=lambda l: l.price),
+                     ts_utc=snapshot.get("ts_utc", ""), provenance=prov,
+                     seq_id=snapshot.get("seq_id"),
+                     raw_depth=max(len(bids), len(asks)),
+                     ts_ms=snapshot.get("ts_ms"),
+                     local_recv_ts_ms=snapshot.get("local_recv_ts_ms"))

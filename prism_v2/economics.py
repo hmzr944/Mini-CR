@@ -42,6 +42,8 @@ class Evaluation:
     weakest_quality: Quality
     rejection_reason: Optional[str]
     capacity_usd: Optional[float]
+    blocked_by: Optional[str] = None      # qualite ou risque, si applicable
+    approved_notional_usd: Optional[float] = None
 
     @property
     def is_actionable(self) -> bool:
@@ -57,18 +59,59 @@ class Evaluation:
             "weakest_quality": self.weakest_quality.value,
             "rejection_reason": self.rejection_reason,
             "capacity_usd": self.capacity_usd,
+            "blocked_by": self.blocked_by,
+            "approved_notional_usd": self.approved_notional_usd,
         }
 
 
 def evaluate(candidate: Candidate, costs: CostBreakdown,
-             required_notional_usd: Optional[float] = None) -> Evaluation:
+             required_notional_usd: Optional[float] = None,
+             quality: Optional[Any] = None,
+             risk_decision: Optional[Any] = None) -> Evaluation:
     """Confronte une capture brute aux couts reels. Aucun seuil arbitraire.
 
     Le seul seuil est `net <= 0`, qui n'est pas un reglage mais une identite
     economique : une capture qui ne couvre pas ses couts n'existe pas.
+
+    Ordre imperatif, non contournable :
+        QUALITE DES DONNEES -> ECONOMIE -> CAPACITE -> RISQUE
+
+    Une donnee inutilisable ne produit PAS un rejet economique : elle produit
+    UNRESOLVED. Confondre "je ne peux pas mesurer" et "ce n'est pas rentable"
+    est l'erreur qui fait abandonner une piste vivante ou poursuivre une piste
+    morte.
     """
     unresolved = costs.unresolved_essentials()
     weakest = costs.weakest_quality()
+
+    # ── -1. Information future : jamais executable, quel que soit le net ──
+    # Une mesure ex-post (entree a l'extreme, sortie au meilleur point) est une
+    # BORNE SUPERIEURE, pas une strategie. La laisser atteindre ACCEPTED ferait
+    # passer un majorant irrealisable pour un edge — l'erreur exacte que ce
+    # systeme existe pour empecher.
+    meta = candidate.metadata or {}
+    if meta.get("uses_future_information") or meta.get("upper_bound"):
+        return Evaluation(
+            status=CaptureStatus.UNRESOLVED,
+            gross_capture_bps=candidate.gross_capture_bps,
+            total_cost_bps=costs.total_bps(), expected_net_capture_bps=None,
+            unresolved_components=["causality"] + unresolved,
+            weakest_quality=weakest, rejection_reason=None,
+            capacity_usd=candidate.capacity_usd,
+            blocked_by="EX_POST_MEASUREMENT: borne superieure utilisant de "
+                       "l'information future — mesure d'amplitude, non executable")
+
+    # ── 0. Qualite des donnees : AVANT toute economie ─────────────────────
+    if quality is not None and not getattr(quality, "is_usable", True):
+        issues = [i.value for i in getattr(quality, "issues", [])]
+        return Evaluation(
+            status=CaptureStatus.UNRESOLVED,
+            gross_capture_bps=candidate.gross_capture_bps,
+            total_cost_bps=None, expected_net_capture_bps=None,
+            unresolved_components=["data_quality"] + unresolved,
+            weakest_quality=Quality.UNKNOWN, rejection_reason=None,
+            capacity_usd=candidate.capacity_usd,
+            blocked_by=f"DATA_QUALITY:{getattr(quality, 'verdict', '?')} {issues}")
 
     if unresolved:
         return Evaluation(
@@ -104,9 +147,23 @@ def evaluate(candidate: Candidate, costs: CostBreakdown,
                               f"(brut {candidate.gross_capture_bps:.4f} - couts {total:.4f})"),
             capacity_usd=candidate.capacity_usd)
 
+    # ── Risque : dernier filtre avant l'execution, jamais contournable ────
+    if risk_decision is not None and not getattr(risk_decision, "allowed", True):
+        switches = [k.value for k in getattr(risk_decision, "triggered", [])]
+        return Evaluation(
+            status=CaptureStatus.REJECTED,
+            gross_capture_bps=candidate.gross_capture_bps,
+            total_cost_bps=total, expected_net_capture_bps=net,
+            unresolved_components=[], weakest_quality=weakest,
+            rejection_reason="risque: " + "; ".join(getattr(risk_decision, "reasons", [])),
+            capacity_usd=candidate.capacity_usd,
+            blocked_by="RISK:" + ",".join(switches), approved_notional_usd=0.0)
+
     return Evaluation(
         status=CaptureStatus.ACCEPTED,
         gross_capture_bps=candidate.gross_capture_bps,
         total_cost_bps=total, expected_net_capture_bps=net,
         unresolved_components=[], weakest_quality=weakest,
-        rejection_reason=None, capacity_usd=candidate.capacity_usd)
+        rejection_reason=None, capacity_usd=candidate.capacity_usd,
+        approved_notional_usd=(getattr(risk_decision, "approved_notional_usd", None)
+                               if risk_decision is not None else None))

@@ -26,7 +26,9 @@ V33_MODULES = {"prism", "prism.strategy", "backtest_v33", "live_monitor_v33",
 #: Le noyau economique : ces modules ne connaissent aucune opportunite concrete.
 CORE_MODULES = ["economics.py", "execution.py", "reconciliation.py", "ledger.py",
                 "costs.py", "capacity.py", "orderbook.py", "instruments.py",
-                "contracts.py", "market_data.py", "core_types.py"]
+                "contracts.py", "market_data.py", "core_types.py", "quality.py",
+                "risk.py", "replay.py", "failure_memory.py", "edge_health.py",
+                "wsclient.py", "ws_collector.py"]
 
 
 class TestV2DoesNotImportV33(unittest.TestCase):
@@ -68,9 +70,30 @@ class TestV2DoesNotImportV33(unittest.TestCase):
 
 class TestNoForbiddenConcepts(unittest.TestCase):
     def test_no_kelly_anywhere(self):
+        """Inspecte les IDENTIFIANTS, pas la prose.
+
+        Un module qui ECRIT "pas de Kelly" dans sa docstring respecte la
+        regle ; une variable nommee kelly_fraction la viole. Un guard qui
+        confond les deux est un faux positif (cf ERREUR 8 du mandat).
+        """
+        offenders = []
         for f in V2_FILES:
-            self.assertNotIn("kelly", f.read_text(encoding="utf-8").lower(),
-                             f"Kelly reintroduit dans {f.name}")
+            hits = sorted(i for i in code_identifiers(f)
+                          if "kelly" in i.split("_"))
+            if hits:
+                offenders.append(f"{f.name}: {hits}")
+        self.assertEqual(offenders, [], "Kelly reintroduit: " + "; ".join(offenders))
+
+    def test_no_score_based_sizing(self):
+        """Le sizing ne doit jamais dependre d'un score de conviction."""
+        offenders = []
+        for f in V2_FILES:
+            idents = code_identifiers(f)
+            for bad in ("score_size_mult", "size_mult", "conviction",
+                        "score_multiplier"):
+                if bad in idents:
+                    offenders.append(f"{f.name}: {bad}")
+        self.assertEqual(offenders, [], "sizing par score: " + "; ".join(offenders))
 
     def test_no_machine_learning(self):
         banned = {"sklearn", "torch", "tensorflow", "xgboost", "lightgbm", "keras"}
@@ -107,6 +130,69 @@ class TestNoForbiddenConcepts(unittest.TestCase):
             for node in ast.walk(tree):
                 if isinstance(node, ast.Constant) and node.value in (28, 28.0):
                     self.fail(f"constante 28 en dur dans {f.name}:{node.lineno}")
+
+
+class TestNoResultDrivenTuning(unittest.TestCase):
+    """ERREUR 7 : backtest optimise jusqu'a obtenir un resultat."""
+
+    def test_no_optimiser_in_v2(self):
+        offenders = []
+        for f in V2_FILES:
+            idents = code_identifiers(f)
+            for bad in ("optimize", "optimise", "tune", "grid_search", "sweep",
+                        "calibrate_to_target", "fit_params", "maximize_pf"):
+                if bad in idents:
+                    offenders.append(f"{f.name}: {bad}")
+        self.assertEqual(offenders, [], "optimiseur detecte: " + "; ".join(offenders))
+
+    def test_thresholds_are_named_and_documented_not_inline(self):
+        """Les seuils vivent dans des dataclasses de politique explicites,
+        pas en litteraux disperses dans la logique de decision."""
+        from prism_v2.edge_health import MIN_N_FOR_ANY_CLAIM
+        from prism_v2.quality import QualityPolicy
+        from prism_v2.risk import RiskLimits
+        self.assertGreaterEqual(MIN_N_FOR_ANY_CLAIM, 30)
+        self.assertGreater(QualityPolicy().max_book_age_ms, 0)
+        self.assertGreater(RiskLimits().max_notional_usd, 0)
+
+
+class TestChainCannotBeBypassed(unittest.TestCase):
+    """INVARIANT 3 : DATA QUALITY -> ECONOMICS -> CAPACITY -> RISK ->
+    EXECUTION -> RECONCILIATION -> LEDGER."""
+
+    def test_evaluate_accepts_quality_and_risk(self):
+        import inspect
+        from prism_v2.economics import evaluate
+        params = set(inspect.signature(evaluate).parameters)
+        self.assertIn("quality", params)
+        self.assertIn("risk_decision", params)
+
+    def test_unusable_quality_short_circuits_before_economics(self):
+        from tests.v2.fixtures import BTC_INVERSE, simple_inverse_book
+        from tests.v2.test_pipeline import candidate, cheap_costs
+        from prism_v2.economics import CaptureStatus, evaluate
+        from prism_v2.quality import assess_book
+        b = simple_inverse_book()
+        q = assess_book(b, BTC_INVERSE, now_ms=b.ts_ms + 10 ** 6)
+        ev = evaluate(candidate(gross=10_000.0), cheap_costs(), quality=q)
+        self.assertIs(ev.status, CaptureStatus.UNRESOLVED)
+
+    def test_ledger_refuses_inconsistent_execution(self):
+        from prism_v2.ledger import LedgerInconsistency, _assert_execution_consistent
+        with self.assertRaises(LedgerInconsistency):
+            _assert_execution_consistent({"executed": True, "order_state": "CREATED"})
+        with self.assertRaises(LedgerInconsistency):
+            _assert_execution_consistent({"executed": False, "order_state": "FILLED"})
+
+    def test_order_state_machine_forbids_shortcuts(self):
+        from prism_v2.execution import IllegalTransition, OrderLifecycle, OrderState
+        lc = OrderLifecycle("x", "BTC-USD-SWAP")
+        with self.assertRaises(IllegalTransition):
+            lc.transition(OrderState.FILLED)
+        lc.transition(OrderState.SUBMITTED)
+        lc.transition(OrderState.FILLED)
+        with self.assertRaises(IllegalTransition):
+            lc.transition(OrderState.CANCELLED)   # FILLED est terminal
 
 
 class TestCoreIsDecoupledFromOpportunities(unittest.TestCase):
@@ -169,7 +255,9 @@ class TestCoreIsDecoupledFromOpportunities(unittest.TestCase):
         def k(n, v):
             return CostComponent(n, v, Quality.DERIVED, "test")
         costs = CostBreakdown(k("fees", 10), k("spread", 50), k("slippage", 0),
-                              k("impact", 5), k("funding", 0))
+                              k("impact", 5), k("funding", 0),
+                              latency=k("latency", 0),
+                              adverse_selection=k("adverse_selection", 0))
         ev = evaluate(cand, costs)
         self.assertIs(ev.status, CaptureStatus.ACCEPTED)
         self.assertAlmostEqual(ev.expected_net_capture_bps, 185.0, places=9)

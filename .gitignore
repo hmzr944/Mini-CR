@@ -38,3 +38,4 @@ skills-lock.json
 # PRISM V2 — donnees de collecte (volumineuses, regenerables depuis l'API)
 prism_v2/data/l2_snapshots/
 prism_v2/data/instruments_*.json
+prism_v2/data/events/
