@@ -108,3 +108,72 @@ Benjamini-Hochberg porte donc sur 4 tests, non 5.
 
 Aucun signal de remplacement n'est introduit : en ajouter un maintenant
 serait exactement le geste que ce protocole existe pour interdire.
+
+---
+
+# Résultat — les quatre signaux échouent
+
+161 actifs, 5 041 barres 4 h, **840 jours** (juin 2024 → septembre 2026).
+Protocole exécuté sans modification.
+
+## Les trois fenêtres, en bps/jour (levier brut 1,0)
+
+| signal | DISCOVERY 420 j | VALIDATION 210 j | HOLDOUT 210 j |
+|---|---:|---:|---:|
+| S1 CARRY+ | **−7,17** | **+11,32** | — rejeté par BH |
+| S2 CARRY− | **+4,44** | **−13,79** | — rejeté par BH |
+| S3 TSMOM | **−0,56** | **+16,91** | **−5,89** |
+| S4 REV | −25,98 | −30,58 | — rejeté par BH |
+
+**Chaque signal change de signe d'une fenêtre à l'autre.** C'est la signature
+d'une absence d'edge, pas d'un edge instable.
+
+## Benjamini-Hochberg, q = 0,10, sur les p-values de VALIDATION
+
+```
+S3_TSMOM     p=0.0026  ->  SURVIT
+S1_CARRY+    p=0.0872  ->  rejete
+S2_CARRY-    p=0.9510  ->  rejete
+S4_REV       p=1.0000  ->  rejete
+```
+
+Un seul survivant. Holdout ouvert une fois, pour lui seul.
+
+## HOLDOUT de S3_TSMOM
+
+```
+net        -1196,3 bps      =  -5,89 bps/jour      Sharpe -4,07
+prix          -89,1 bps        drawdown max 1764 bps
+funding       -35,1 bps        turnover total 163,9
+couts       -1072,0 bps        rendement annuel -21,5 %
+```
+
+**Critère d'invalidation n° 2 déclenché** : net > 0 en validation, ≤ 0 en
+holdout. Le dernier signal tombe.
+
+## Ce que le résultat enseigne, au-delà du verdict
+
+**1. Le carry n'est pas un piège stable — il est instable.** Sur 45 jours
+j'avais mesuré β = −5,5 et conclu « le carry est un piège ». Sur 840 jours,
+S1 perd en discovery (−7,17) et gagne en validation (+11,32). La relation
+funding/prix **dépend du régime**. Ma conclusion précédente était vraie sur sa
+période et fausse comme loi. C'est exactement ce que 45 jours ne pouvaient pas
+révéler — et c'est le vrai gain de cette collecte.
+
+**2. Le coût n'est pas un détail, c'est le terme dominant.** Sur le holdout de
+S3, le brut vaut −124 bps et les coûts **1 072 bps**. Sur S4, coûts 3 494 bps
+contre un brut de −2 715. La position continue a bien supprimé le churn des
+allers-retours, mais ces signaux exigent un turnover que 6,54 bps par unité
+ne pardonnent pas.
+
+**3. La puissance statistique a fait son travail.** Le test de 45 jours avait
+produit un Sharpe de 5,32 en discovery. Ici, avec 18× plus de données, aucun
+signal ne tient. Le premier résultat était du bruit, et seul un échantillon
+correctement dimensionné pouvait le dire.
+
+## Ce qui n'a pas été fait
+
+Aucun cinquième signal. Aucun réglage de fenêtre, de γ, de bande, de coût,
+d'univers. Aucune exclusion d'actif. Les trois fenêtres sont **brûlées** :
+toute recherche supplémentaire sur ces 840 jours produirait un résultat sans
+valeur, et je ne le présenterais pas comme tel.
