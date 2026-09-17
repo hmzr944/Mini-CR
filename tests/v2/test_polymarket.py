@@ -214,3 +214,26 @@ class TestBookSeriesRefusesStaleAndBrokenBooks(unittest.TestCase):
     def test_horizons_exceed_the_collection_step(self):
         from prism_v2.poly_markout import HORIZONS_S
         self.assertGreaterEqual(min(HORIZONS_S), 60)
+
+
+class TestPriceBucketsSeparateTheTwoDocumentedExtremes(unittest.TestCase):
+    """Le biais favori/longshot est ASYMETRIQUE : sous 0,10 on perd 19,3 c
+    par dollar, au-dela de 0,90 on gagne 0,83 c. Les confondre dans une seule
+    tranche « extreme » masquerait exactement ce qui les distingue."""
+
+    def test_longshot_and_favourite_are_distinct_buckets(self):
+        import inspect
+        from prism_v2 import poly_markout
+        src = inspect.getsource(poly_markout.run)
+        self.assertIn("longshot p<0.15", src)
+        self.assertIn("favori p>0.85", src)
+        # et jamais reunis sous un seul libelle
+        self.assertNotIn("extreme (p<0.15 ou p>0.85)", src)
+
+    def test_rebate_and_favourite_bias_do_not_overlap(self):
+        """Le rebate culmine a p = 0,5 ; le biais favori est a p -> 1.
+        Aucune tranche de prix ne maximise les deux."""
+        m = market(fee_rate=0.04)
+        rebate_mid = m.maker_rebate_per_share(0.50)
+        rebate_fav = m.maker_rebate_per_share(0.90)
+        self.assertGreater(rebate_mid, rebate_fav * 2)

@@ -103,3 +103,47 @@ La récompense, elle, est un subside **plafonné en valeur absolue** : elle peut
 - [babajaha4/pmlp](https://github.com/babajaha4/pmlp)
 - [direkturcrypto/polymarket-terminal](https://github.com/direkturcrypto/polymarket-terminal)
 - [Polymarket/poly-market-maker](https://github.com/Polymarket/poly-market-maker)
+
+---
+
+## 🟢 Vérifié — littérature académique
+
+**Biais favori/longshot sur Polymarket** (588 M de trades, 2,48 M de comptes) :
+
+| zone | rendement documenté |
+|---|---|
+| achats **< 0,10** | **−19,3 ¢ par dollar** |
+| achats **≥ 0,90** | **+0,83 ¢ par dollar** |
+
+Deux conséquences directes pour ce projet.
+
+**1. Une piste est réfutée sans coût.** Le « sniper » à 1–3 ¢ de
+`polymarket-terminal` achète exactement dans la zone qui perd 19,3 ¢ par
+dollar. Famille fermée par la littérature, pas par une expérience à mener.
+
+**2. Les deux sources de revenu ne se recouvrent pas.**
+
+| prix p | rebate (rate = 0,04) | biais documenté |
+|---|---|---|
+| 0,05 | 0,048 ¢/part | −19,3 ¢/$ |
+| **0,50** | **0,250 ¢/part** | non documenté |
+| 0,90 | 0,090 ¢/part | +0,83 ¢/$ |
+
+Le rebate culmine à p = 0,5 ; le biais favori est à p → 1. À p = 0,90 le biais
+(≈ 0,75 ¢/part sur une part à 90 ¢) vaut **8 fois le rebate**. Une stratégie
+qui maximise l'un renonce à l'autre. Le découpage par tranche de prix sépare
+donc explicitement longshot et favori, au lieu de les réunir sous « extrême ».
+
+**Mise en garde méthodologique de l'étude elle-même** : le signe s'inverse
+selon le regroupement — les longshots perdent 6,3 ¢/$ à contrat égal mais
+*gagnent* 4,1 ¢/$ quand les contrats liés sont d'abord groupés par événement
+parent. Un résultat qui dépend à ce point de la convention d'agrégation
+n'autorise aucune conclusion forte sur la zone intermédiaire.
+
+Et l'étude note que le décile de comptes achetant le plus de longshots
+**obtient des rendements semblables aux autres** : acheter des longshots n'est
+pas une compétence distinctive, dans un sens comme dans l'autre.
+
+### Source
+
+- [The Favorite–Longshot Bias in Prediction Markets: Evidence from Polymarket](https://arxiv.org/abs/2609.12878)

@@ -284,26 +284,39 @@ def run(books_path: Path = DEFAULT_BOOKS, markets_path: Path = DEFAULT_MARKETS,
                            "with_rebate": b, "rebate_flips_the_sign": flipped}
 
     print(); print("=" * 84)
-    print("4. LA TENSION DU REBATE : p(1-p)"); print("=" * 84)
-    print("Le rebate est maximal a p = 0,5, la ou l'issue est la plus")
-    print("incertaine — donc a priori la ou l'adverse selection est la pire.\n")
+    print("4. DEUX EFFETS QUI NE SE RECOUVRENT PAS"); print("=" * 84)
+    print("Le rebate suit p(1-p) : maximal a p = 0,5, nul aux extremes.")
+    print("Le biais favori/longshot documente est aux EXTREMES, et asymetrique :")
+    print("  achats sous 0,10 : -19,3 c par dollar   (Polymarket, 588 M trades)")
+    print("  achats au-dela de 0,90 : +0,83 c par dollar")
+    print("Confondre les deux extremes dans une seule tranche masquerait cette")
+    print("asymetrie : ils sont donc SEPARES.\n")
     buckets: Dict[str, List[Tuple[float, float, float]]] = {}
     for f in all_fills:
         v = f.net_per_share(h)
         if v is None:
             continue
         p = f.price
-        k = ("extreme (p<0.15 ou p>0.85)" if p < 0.15 or p > 0.85
-             else "median (0.35-0.65)" if 0.35 <= p <= 0.65 else "intermediaire")
+        if p < 0.15:
+            k = "longshot p<0.15 (zone perdante documentee)"
+        elif p > 0.85:
+            k = "favori p>0.85 (zone gagnante documentee)"
+        elif 0.35 <= p <= 0.65:
+            k = "median 0.35-0.65 (rebate maximal)"
+        else:
+            k = "intermediaire"
         buckets.setdefault(k, []).append((v, f.rebate, f.markout[h]))
-    print(f"{'tranche de prix':<28}{'N':>7}{'rebate':>10}{'markout':>11}{'NET':>11}{'t':>8}")
-    print("-" * 75)
-    for k in ("extreme (p<0.15 ou p>0.85)", "intermediaire", "median (0.35-0.65)"):
+    print(f"{'tranche de prix':<44}{'N':>7}{'rebate':>10}{'markout':>11}"
+          f"{'NET':>11}{'t':>8}")
+    print("-" * 91)
+    for k in ("longshot p<0.15 (zone perdante documentee)", "intermediaire",
+              "median 0.35-0.65 (rebate maximal)",
+              "favori p>0.85 (zone gagnante documentee)"):
         rows = buckets.get(k)
         if not rows:
             continue
         s = _stats([r[0] for r in rows])
-        print(f"{k:<28}{s['n']:>7,}{statistics.mean(r[1] for r in rows):>10.5f}"
+        print(f"{k:<44}{s['n']:>7,}{statistics.mean(r[1] for r in rows):>10.5f}"
               f"{statistics.mean(r[2] for r in rows):>11.5f}"
               f"{s['mean']:>11.5f}{(s['t_stat'] or 0):>8.2f}")
     report["by_price_bucket"] = {
