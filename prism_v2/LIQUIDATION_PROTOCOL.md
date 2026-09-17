@@ -183,3 +183,72 @@ qui n'en a plus.
 `test_LA_REGLE_PEUT_SE_DECLENCHER_SUR_DONNEES_EPARSES` vérifie qu'une règle
 **peut** se déclencher sur des données réalistes. Une règle qui ne peut pas se
 déclencher n'est pas une hypothèse, et rien dans le dépôt ne le vérifiait.
+
+---
+
+# Mesure — le carnet PENDANT le flux forcé
+
+Question tranchée : *les teneurs se retirent-ils au moment du choc, rendant le
+déplacement visible mais non capturable ?* C'était mon barreau de mort attendu
+(LIQUIDITÉ), et c'est aussi la prémisse d'une analyse extérieure affirmant que
+le spread passe « de 2 bps à 60 bps » et que le coût réel atteint 70 bps.
+
+**520 relevés, 5 instruments, 599 liquidations observées**, carnet complet
+échantillonné toutes les ~2 s.
+
+## Le spread ne s'écarte pas
+
+| instrument | demi-spread normal | pendant le choc | ratio |
+|---|---:|---:|---:|
+| BTC | 0,01 bps | 0,01 bps | **1,00** |
+| ETH | 0,02 | 0,02 | **1,00** |
+| SOL | 0,50 | 0,50 | **1,00** |
+| XRP | 0,38 | 0,38 | **1,00** |
+| DOGE | 0,61 | 0,61 | **1,00** |
+
+## La profondeur ne s'effondre pas
+
+| instrument | 5 niveaux, normal | pendant le choc | ratio |
+|---|---:|---:|---:|
+| BTC | 205 469 $ | 249 119 $ | **1,21** |
+| ETH | 161 898 $ | 187 126 $ | **1,16** |
+| SOL | 316 437 $ | 304 814 $ | 0,96 |
+| XRP | 115 672 $ | 97 162 $ | 0,84 |
+| DOGE | 142 246 $ | 112 141 $ | 0,79 |
+
+## Le coût réel
+
+```
+aller-retour taker = 2 x 5 bps de frais + 2 x demi-spread
+  BTC  10,01 bps      SOL  10,99 bps
+  ETH  10,04 bps      XRP  10,77 bps
+  DOGE 11,23 bps
+```
+
+**10 à 11 bps, dominés par les frais.** L'estimation extérieure de 70 bps est
+fausse d'un facteur 6 à 7. Le spread est négligeable devant les frais sur ces
+instruments.
+
+## Conséquences
+
+1. **Le coût d'exécution n'est pas le goulot.** Contre une capture
+   exploratoire de 12,47 bps (ensemble complet) ou 36,3 bps (médiane du
+   sous-ensemble ample), un coût de 11 bps laisse de la place. Le barreau
+   LIQUIDITÉ, que j'attendais fatal, ne l'est pas ici.
+2. **La prémisse du « Distress Maker » tombe sur ces instruments.** Poser des
+   ordres dormants « là où la liquidité s'est effondrée » suppose un
+   effondrement qui n'a pas lieu.
+3. **La question redevient celle de l'edge lui-même** : le retour de prix
+   est-il réel ? Mon `t = 1,31` dit qu'il n'est pas établi. C'est exactement
+   ce que la collecte vers l'avant doit trancher, et le plan est inchangé.
+
+## Trois limites, à ne pas oublier
+
+- **Résolution 2 s.** Un écartement sub-seconde serait invisible. Mais s'il
+  est sub-seconde, il n'est pas exploitable par ce système non plus.
+- **Cinq instruments très liquides.** Le surdépassement de 81 bps a été mesuré
+  sur 21 instruments dont des illiquides, qui peuvent se comporter autrement.
+- **Aucune cascade majeure dans la fenêtre.** J'ai mesuré des liquidations de
+  routine. Une vraie cascade se comporterait peut-être comme l'analyse le
+  décrit — mais si l'edge n'existe que lors de cascades rares, la rotation du
+  capital s'effondre et l'objectif échoue pour une autre raison.
