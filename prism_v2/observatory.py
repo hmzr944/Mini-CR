@@ -38,6 +38,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
+from .contracts import usd_notional
 from .instruments import InstrumentSpec
 from .l2book import L2BookSet
 from .wsclient import connect_okx_public
@@ -68,6 +69,10 @@ class ObservatoryStats:
     invalid_snapshots: int = 0
     messages: int = 0
     trades: int = 0
+    #: Transactions recues sur un instrument sans specification connue. La
+    #: taille y est sans unite exploitable, donc le flux serait faux. Compte,
+    #: jamais devine.
+    trades_without_spec: int = 0
     reconnects: int = 0
     sequence_gaps: int = 0
     bytes_written: int = 0
@@ -253,10 +258,22 @@ class MarketObservatory:
                     px, sz = float(row["px"]), float(row["sz"])
                 except (KeyError, TypeError, ValueError):
                     continue
+                spec = books.specs.get(inst)
+                if spec is None:
+                    # Sans specification, la taille n'a pas d'unite connue.
+                    # On ne devine pas : la transaction est ignoree et comptee.
+                    stats.trades_without_spec += 1
+                    continue
                 b = trades.setdefault(inst, fresh())
                 b["n"] += 1
                 stats.trades += 1
-                usd = px * sz
+                # `sz` est en CONTRATS sur un swap. Sur un inverse, un contrat
+                # vaut ctVal USD et le notionnel ne depend PAS du prix.
+                # `px * sz` surevaluait BTC-USD-SWAP d'un facteur px/ctVal =
+                # 752 et sous-evaluait ADA-USD-SWAP d'un facteur 0,035.
+                # C'est la meme classe d'erreur que la profondeur de carnet
+                # lue en unites de base : elle a sa fonction dediee.
+                usd = usd_notional(spec, sz, px)
                 if row.get("side") == "buy":
                     b["buy_usd"] += usd
                 else:
