@@ -1,5 +1,25 @@
 # PRISM — où se trouve, ou ne se trouve pas, l'argent
 
+**Cible fixée : 1 000 € → ~20 €/jour net, ambition ×5 en 60 jours.**
+Traduite dans la métrique du projet :
+
+| formulation | bps/jour de capital |
+|---|---|
+| 20 €/jour sur 1 000 € | **200** |
+| ×5 en 60 jours | **272** |
+| *(ancienne cible ×10/an, pour mémoire)* | 63,28 |
+
+La cible est donc **3 à 4 fois plus exigeante** que celle contre laquelle les
+mesures de ce document ont été faites. Le critère d'admission devient
+`r ≥ 200/L + c/T`, soit avec le levier réellement mesuré (3,4× à un jour) et
+25 bps d'aller-retour : **≈ 84 bps/jour de notionnel, ≈ 306 %/an**.
+
+**Contrainte de capital à 1 000 € : aucune.** Les 482 instruments SWAP d'OKX
+sont accessibles ; la marge minimale médiane vaut 0,006 % du capital, le
+maximum 0,1 %. Ni la taille minimale ni la profondeur ne mordent à ce niveau.
+Le capital ne limite rien — ce qui retire une excuse et laisse tout reposer sur
+le rapport flux / coût.
+
 Ce document répond à la mission : *comment construire, à partir de ce que le
 marché permet réellement, un système générant beaucoup de PnL net rapidement
 avec peu de capital ?*
@@ -150,6 +170,76 @@ rapporte le coût du capital, parce que c'est ce que l'arbitrage impose.
 L'objectif (×10 en un an ≈ 900 %/an) en est distant d'un facteur 55 à 180, et
 cette distance est **maintenue par le marché**, pas par mon incapacité à la
 trouver.
+
+---
+
+## 3 ter. Là où rien n'arbitre : actions, matières, pré-IPO
+
+La conclusion de la section 3 — *les flux couverts sont épinglés près du coût
+du capital par l'arbitrage* — fait une prédiction falsifiable : **un
+instrument que rien n'arbitre devrait y échapper.**
+
+OKX cote trois classes que PRISM n'avait jamais inventoriées : des
+perpétuels sur **actions et ETF tokenisés** (TSLA, NVDA, MU, MSTR, QQQ, SOXL,
+SAMSUNG, SKHYNIX), sur **matières premières** (XAU, XAG, CL, BZ), et sur des
+noms **pré-IPO** (SPCX, ZHIPU, UNITREE) qui n'ont *aucun* sous-jacent
+négociable — ni spot, ni emprunt, ni livraison.
+
+**La prédiction se vérifie.** Funding sur 92 jours, cadence lue période par
+période :
+
+| classe | p90 \|funding\| | demi-spread médian |
+|---|---|---|
+| crypto majeur | **3,0** bps/j (plafonné net) | 0,39 bps |
+| actions | 10,6 | 0,26 |
+| matières | 14,3 | 0,51 |
+| pré-IPO | 19,5 | 1,55 |
+
+SKHYNIX ressort à **16,55 bps/jour de moyenne (604 %/an)** avec un demi-spread
+de 0,04 bps et 165 M$/jour de volume. Douze fois le plus gros flux couvert
+mesuré ailleurs, pour un coût de transaction quasi nul.
+
+**Et ça ne tient pas.** Trois raisons mesurées, dans cet ordre :
+
+1. **Ce n'est pas une accumulation, ce sont des pointes.** SKHYNIX : 48 % de
+   périodes positives, les 5 % plus grandes portent 35 % du cumul, et la
+   **médiane par période vaut 0,000 bps**. La période typique ne paie rien.
+   BZ et CL sont pires : 58 % et 76 % du cumul dans 5 % des périodes.
+
+2. **Le PnL apparent est de la sélection de période.** Un court SOXL affiche
+   +63 bps/jour sur la fenêtre — dont 540 USD de prix contre 38 de funding,
+   parce que SOXL a chuté de 44 %. Le même calcul donne −5 bps/jour sur NVDA,
+   −38 sur BZ, −37 sur CL. C'est la fenêtre, pas la stratégie.
+
+3. **Ce que rien n'arbitre, rien ne couvre non plus.** Encaisser le funding
+   exige d'être court ; couvrir par le sous-jacent est impossible (pas d'accès
+   au KRX, pas d'emprunt). Reste la couverture par un perpétuel corrélé :
+
+   | paire | corrélation | différentiel couvert | % périodes > 0 | résidu p90/h |
+   |---|---|---|---|---|
+   | SKHYNIX/SOXL | 0,698 | **12,84** bps/j | 50 % | 1,23 % |
+   | SKHYNIX/MU | 0,761 | 12,61 | 46 % | 1,10 % |
+   | SKHYNIX/SAMSUNG | 0,827 | 7,39 | 50 % | 0,96 % |
+   | BZ/CL | 0,974 | −3,74 | 17 % | 0,18 % |
+
+   Le meilleur flux couvert vaut **12,84 bps/jour contre 84 requis (0,15×)**,
+   il est positif une fois sur deux, et le résidu de couverture non couvert
+   vaut ~1 %/heure — deux ordres de grandeur au-dessus du flux.
+
+**Un mécanisme testé et confirmé, qui ne suffit pas.** SKHYNIX et SAMSUNG
+suivent des actions du KRX, fermé 17,5 h sur 24 et le week-end. Si le résidu
+se concentrait en séance, détenir hors séance effondrerait le risque de prix.
+Mesuré : écart-type du résidu **0,961 %/h en séance contre 0,550 %/h hors
+séance, rapport 1,75×**. Le mécanisme est réel. Mais hors séance le résidu
+vaut encore **51 %/an** — les deux perpétuels divergent à 51 %/an *alors que
+leur sous-jacent ne peut pas bouger* — contre un flux de 7,09 bps/jour.
+
+**Ce que cette section ajoute à la conclusion générale**, et c'est plus net
+que ce qui précède : *ce qui n'est pas épinglé par l'arbitrage n'est pas non
+plus couvrable, parce que couvrir c'est arbitrer.* L'absence d'ancrage qui
+laisse le funding s'écarter est exactement ce qui empêche de neutraliser le
+prix. Magnitude et couvrabilité ne sont pas seulement anti-corrélées : elles
+sont **la même variable, vue des deux côtés**.
 
 ---
 
