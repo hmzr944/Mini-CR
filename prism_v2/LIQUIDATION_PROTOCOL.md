@@ -68,6 +68,17 @@ point de départ.
   instrument, jamais supposé nul.
 - **Taille** : bornée par la profondeur au touch, jamais par le capital.
 
+## Lacune de spécification, résolue et signalée
+
+Le protocole ne disait pas ce qui se passe quand la **médiane glissante vaut
+zéro** — cas d'un instrument sans flux forcé habituel. L'ampleur y est
+indéfinie (division par zéro).
+
+Résolution retenue : **ne pas déclencher.** Ce choix ne peut que *retirer* des
+déclenchements, jamais en fabriquer, donc il ne peut pas flatter le résultat.
+L'alternative — un plancher de notionnel absolu — aurait introduit un
+paramètre après le gel, ce qui est précisément ce que le gel interdit.
+
 ## Jeu de test — il n'existe pas encore
 
 Les 24 h analysées sont **brûlées**. La règle sera testée sur des données
