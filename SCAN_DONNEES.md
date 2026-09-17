@@ -139,6 +139,55 @@ de frais.
 
 ---
 
+## 3 bis. Est-ce mon barème de frais qui bloque ?
+
+Puisque la contrainte qui mord est le plancher de coût, la question suivante
+s'impose : **à quel niveau de frais la réponse changerait-elle ?** Les deux
+mesures ont été inversées. Aucun barème n'est postulé — les seuils ci-dessous
+sont une propriété des données.
+
+**Fourniture de liquidité — frais maker de seuil, par jambe passive**
+
+| instrument | demi-spread | sélection adverse 1 s | frais de seuil |
+|---|---|---|---|
+| ADA-USDT-SWAP | 2,72 | 2,70 | **+0,03** |
+| DOT-USD-SWAP | 4,28 | 4,52 | −0,24 |
+| BCH-USDT-SWAP | 2,32 | 2,69 | −0,37 |
+| BTC-USDT-SWAP | 0,01 | 1,21 | −1,20 |
+| ETC-USD-SWAP | 1,88 | 5,61 | −3,73 |
+
+**Sur 12 des 13 instruments, la gratuité complète ne suffirait pas** : la
+venue devrait me *payer* une remise de 0,24 à 3,73 bps par jambe pour
+atteindre le simple point mort. Le seul seuil non négatif, ADA-USDT-SWAP,
+vaut +0,03 bps — n'importe quel frais le tue, et c'est encore en supposant la
+file d'attente gagnée à chaque transaction.
+
+**Dislocations transversales — balayage du frais par traversée**
+
+Baisser les frais abaisse aussi le seuil de déclenchement : on entre alors sur
+des dislocations plus petites, qui se referment moins. Ce n'est donc pas le
+même calcul décalé d'une constante, et cela se remesure.
+
+| paire | 5 bps | 2 bps | 1 bps | **0 bps** |
+|---|---|---|---|---|
+| ETH | — | −5,5 | −3,8 | **−0,0** (t = −1,7) |
+| SOL | — | −9,4 | −5,3 | **−1,1** |
+| DOGE | −9,6 | −8,2 | −5,0 | **−1,0** |
+| XRP | −17,3 | −9,9 | −6,8 | **−2,4** |
+| UNI | −28,8 | −17,1 | −13,2 | **−9,1** |
+
+**0 cellule positive sur 56, y compris à frais nuls.** Sur les paires les plus
+liquides, les demi-spreads seuls (ETH 0,1 bps) sont pourtant *inférieurs* à la
+dislocation médiane — j'ai cru un instant que le signe basculerait. La mesure
+dit non : ce qu'on gagne en abaissant le coût, on le perd en entrant sur des
+écarts qui ne reviennent pas.
+
+Conclusion des deux : **ce n'est pas mon palier de frais qui bloque, c'est
+tout palier de frais.** Changer de venue, monter en volume ou négocier un
+tarif VIP ne renverse aucun de ces signes.
+
+---
+
 ## 4. Deux corrections de code
 
 **Défaut réel, corrigé.** `observatory.py` agrégeait le flux signé en
@@ -175,14 +224,21 @@ donnée n'avait simplement jamais été ouverte.
 
 ## 5. Ce que les données disent de la direction
 
-La contrainte qui mord n'est pas le signal. C'est le plancher de coût — il
-est le même dans les trois mesures, et le signal échoue toujours du même
-facteur contre lui.
+La contrainte qui mord n'est pas le signal. C'est le plancher de coût — il est
+le même dans les trois mesures, et le signal échoue toujours du même facteur
+contre lui.
 
-Chercher un signal plus grand dans ce périmètre revient à chercher un facteur
-cinq là où six mesures indépendantes trouvent le même ordre de grandeur. La
-seule direction que ces données laissent ouverte est celle qui **change le
-plancher de coût**, pas celle qui cherche un signal plus grand.
+Mais la section 3 bis ferme aussi la sortie évidente. **Le plancher de coût
+n'est pas mon barème de frais.** À frais nuls, la dislocation transversale
+reste négative sur 14 paires sur 14 ; la fourniture de liquidité exigerait une
+remise payée par la venue sur 12 instruments sur 13. Le plancher qui bloque
+est le demi-spread lui-même, et le demi-spread est de la même taille que la
+sélection adverse parce que c'est ce qui le fixe.
+
+Ce qui reste ouvert n'est donc ni « un signal plus grand » ni « des frais plus
+bas » dans ce périmètre : les deux sont mesurés fermés. Ce qui reste ouvert est
+un périmètre où le demi-spread n'est pas fixé par la même contrainte — et cela
+se démontre par la mesure, pas par l'espoir.
 
 Aucun résultat positif n'est retenu dans ce document. Aucun seuil, aucune
 hypothèse de coût, aucun remplissage n'a été modifié pour rendre un chiffre

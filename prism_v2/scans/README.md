@@ -19,6 +19,9 @@ python -m prism_v2.scans.mm_scan                # demi-spread contre selection a
 python -m prism_v2.scans.mm_bh                  # correction de multiplicite
 python -m prism_v2.scans.panel                  # panneau synchrone 15 instruments
 python -m prism_v2.scans.xsec                   # dislocations transversales
+                                                #   + balayage du frais par traversee
+python -m prism_v2.scans.mm_placebo             # placebo sur l'unique survivant
+python -m prism_v2.scans.breakeven              # a quels frais le signe basculerait
 ```
 
 `ws_full` prend une dizaine de minutes : il rejoue 287 118 messages de carnet

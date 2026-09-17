@@ -41,6 +41,10 @@ W_BARS = 600          # fenetre d'estimation du beta (10 min)
 K_BARS = 30           # fenetre de dislocation (30 s)
 H_BARS = [10, 30, 60, 300]
 TAKER = 5.0
+#: Balayage du frais par traversee. 5,0 bps est le tarif public taker OKX.
+#: 0,0 n'est offert par aucune venue connue ici : il sert de borne. Si le
+#: signe ne bascule meme pas a frais nuls, aucun bareme ne le fera.
+FEE_SWEEP = [5.0, 2.0, 1.0, 0.0]
 
 # --- grille commune -------------------------------------------------------
 t0 = max(v[0][0] for v in P.values())
@@ -142,3 +146,50 @@ for k, m, t, n in pos[:10]:
 if not pos:
     print("  AUCUN. Aucune dislocation superieure au cout ne se referme "
           "assez pour payer ce cout.")
+
+# ── le signe basculerait-il a frais plus bas ? ─────────────────────────────
+# Sur les paires les plus liquides, les demi-spreads seuls valent moins que
+# la dislocation mediane. Le dire ne suffit pas : on remesure, en faisant
+# varier le frais par traversee, seuil de declenchement compris. Un frais
+# plus bas declenche sur des dislocations plus petites, donc le resultat
+# n'est PAS le meme calcul decale d'une constante.
+print(f"\n\nBALAYAGE DU FRAIS PAR TRAVERSEE")
+print(f"Le seuil de declenchement suit le cout : baisser les frais fait entrer")
+print(f"sur des dislocations plus petites. Rien n'est decale d'une constante.\n")
+print(f"{'paire':<16}", end="")
+for fee in FEE_SWEEP:
+    print(f"{'frais ' + format(fee, '.0f') + ' bps':>16}", end="")
+print()
+print("-" * 80)
+any_pos = []
+for alt in ALTS:
+    y, x = R[alt], R[REF]
+    print(f"{alt:<16}", end="")
+    for fee in FEE_SWEEP:
+        cost = 4 * fee + 2 * (hs[alt] + hs[REF])
+        vals = []
+        for n in range(W_BARS + K_BARS, N - max(H_BARS)):
+            b = beta(y, x, n - W_BARS - K_BARS, n - K_BARS)
+            if b is None:
+                continue
+            d = sum(y[n - K_BARS:n]) - b * sum(x[n - K_BARS:n])
+            if abs(d) < cost:
+                continue
+            sgn = -1.0 if d > 0 else 1.0
+            fwd = sum(y[n:n + 30]) - b * sum(x[n:n + 30])
+            vals.append(sgn * fwd - cost)
+        if len(vals) < 30:
+            print(f"{'n<30':>16}", end="")
+            continue
+        m = st.fmean(vals)
+        t, _ = t_test_one_sided(vals)
+        print(f"{format(m, '+.1f') + ' (t=' + format(t, '.1f') + ')':>16}", end="")
+        if m > 0:
+            any_pos.append((alt, fee, m, t, len(vals)))
+    print()
+
+print(f"\ncellules a moyenne positive : {len(any_pos)}")
+for alt, fee, m, t, n in sorted(any_pos, key=lambda r: -r[2]):
+    print(f"  {alt:<16} frais {fee:.0f} bps  net {m:+.2f} bps  t={t:.2f}  n={n}")
+if not any_pos:
+    print("  AUCUNE, y compris a frais nuls. Ce n'est pas le bareme qui bloque.")
