@@ -11,7 +11,8 @@ import unittest
 
 from prism_v2.portfolio import (
     BookState, RiskConfig, SignalConfig, TargetConfig, TradingConfig,
-    apply_step, expected_returns, max_reachable_gross, move_toward_target,
+    apply_step, expected_returns, exposures, market_betas,
+    max_reachable_gross, move_toward_target, neutralise_beta,
     summarise_book, target_weights, volatilities,
 )
 
@@ -129,6 +130,81 @@ class TestCible(unittest.TestCase):
     def test_un_actif_sans_vol_connue_est_ecarte(self):
         w = target_weights({"A": 1e-4, "X": 1e-4}, {"A": 0.01}, TargetConfig())
         self.assertNotIn("X", w)
+
+
+class TestNeutraliteBeta(unittest.TestCase):
+    """Un livre dollar-neutre n'est PAS neutre au marche.
+
+    Mesure sur 420 jours : beta +0,111 et 23,8 % de la variance du PnL venant
+    du marche, alors que le livre se croyait neutre. Un livre qui se trompe
+    ainsi attribue a son signal une performance qui vient de la direction du
+    marche — et change de signe selon que la fenetre monte ou descend.
+    """
+
+    def setUp(self):
+        import random
+        random.seed(4)
+        self.beta = {f"a{i}": 0.5 + i * 0.15 for i in range(40)}
+        self.mu = {f"a{i}": random.gauss(0, 1e-4) for i in range(40)}
+        self.vol = {f"a{i}": random.uniform(0.005, 0.03) for i in range(40)}
+
+    def test_la_neutralite_dollar_ne_suffit_pas(self):
+        w = target_weights(self.mu, self.vol,
+                           TargetConfig(beta_neutral=False))
+        e = exposures(w, self.beta)
+        self.assertAlmostEqual(e["net_dollar"], 0.0, places=9)
+        self.assertGreater(abs(e["net_beta"]), 0.1)      # residuel important
+
+    def test_la_neutralite_beta_reduit_l_exposition_d_un_ordre(self):
+        sans = exposures(target_weights(self.mu, self.vol,
+                                        TargetConfig(beta_neutral=False)),
+                         self.beta)
+        avec = exposures(target_weights(self.mu, self.vol,
+                                        TargetConfig(beta_neutral=True),
+                                        beta=self.beta), self.beta)
+        self.assertLess(abs(avec["net_beta"]), abs(sans["net_beta"]) / 10.0)
+
+    def test_les_deux_neutralites_tiennent_ensemble(self):
+        w = target_weights(self.mu, self.vol, TargetConfig(beta_neutral=True),
+                           beta=self.beta)
+        e = exposures(w, self.beta)
+        self.assertAlmostEqual(e["net_dollar"], 0.0, places=8)
+        self.assertLess(abs(e["net_beta"]), 0.02)
+
+    def test_la_projection_annule_exactement_l_exposition(self):
+        w = {"a": 0.3, "b": -0.1, "c": 0.2}
+        b = {"a": 1.2, "b": 0.6, "c": 0.9}
+        out = neutralise_beta(w, b)
+        self.assertAlmostEqual(sum(out[k] * b[k] for k in out), 0.0, places=12)
+
+    def test_un_actif_sans_beta_connu_est_laisse_intact(self):
+        """L'exclure changerait le livre pour une raison technique."""
+        out = neutralise_beta({"a": 0.3, "inconnu": 0.2}, {"a": 1.0})
+        self.assertEqual(out["inconnu"], 0.2)
+
+    def test_sans_beta_mesure_on_ne_neutralise_pas(self):
+        w = {"a": 0.3, "b": -0.2}
+        self.assertEqual(neutralise_beta(w, {}), w)
+        self.assertEqual(neutralise_beta(w, {"a": 0.0, "b": 0.0}), w)
+
+    def test_les_betas_sont_mesures_causalement(self):
+        """Un actif qui EST le marche a un beta de 1."""
+        rets = {"a": [0.01, -0.02, 0.03, 0.01, -0.01] * 4,
+                "b": [0.01, -0.02, 0.03, 0.01, -0.01] * 4}
+        b = market_betas(rets)
+        self.assertAlmostEqual(b["a"], 1.0, places=9)
+
+    def test_un_actif_deux_fois_plus_sensible_a_un_beta_double(self):
+        base = [0.01, -0.02, 0.03, 0.01, -0.015] * 4
+        rets = {"x": base, "y": [2 * r for r in base]}
+        b = market_betas(rets)
+        self.assertAlmostEqual(b["y"] / b["x"], 2.0, places=6)
+
+    def test_historique_trop_court_ne_produit_aucun_beta(self):
+        self.assertEqual(market_betas({"a": [0.01] * 5, "b": [0.02] * 5}), {})
+
+    def test_marche_sans_variance_ne_produit_aucun_beta(self):
+        self.assertEqual(market_betas({"a": [0.0] * 20, "b": [0.0] * 20}), {})
 
 
 class TestBande(unittest.TestCase):

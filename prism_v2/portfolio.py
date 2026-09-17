@@ -153,10 +153,78 @@ class TargetConfig:
     max_weight: float = 0.10
     #: Neutralite dollar : somme des poids ramenee a zero.
     dollar_neutral: bool = True
+    #: Neutralite BETA. Un livre dollar-neutre n'est PAS neutre au marche
+    #: des lors que les actifs n'ont pas le meme beta — et en crypto ils ne
+    #: l'ont jamais. Mesure sur 420 jours : le livre carry portait un beta
+    #: de +0,111 et 23,8 % de la variance de son PnL venait du marche.
+    #:
+    #: Cette variance-la n'est pas de l'alpha : c'est du bruit directionnel
+    #: qui masque le signal et fait changer le resultat de signe selon que
+    #: la fenetre est haussiere ou baissiere. La retirer ne peut pas creer
+    #: de rendement ; elle rend seulement visible celui qui existe.
+    beta_neutral: bool = True
+
+
+def neutralise_beta(weights: Dict[str, float], beta: Dict[str, float]
+                    ) -> Dict[str, float]:
+    """Retire l'exposition au marche en projetant les poids orthogonalement
+    au vecteur de betas.
+
+        w' = w - (w.b / b.b) * b
+
+    Par construction w'.b = 0 : le livre n'a plus d'exposition au facteur
+    commun. Les actifs sans beta connu sont laisses INTACTS plutot
+    qu'exclus — les exclure changerait le livre pour une raison technique.
+
+    Si aucun beta n'est connu, ou s'ils sont tous nuls, la fonction rend les
+    poids inchanges : on ne neutralise pas contre un facteur qu'on n'a pas
+    mesure.
+    """
+    common = [a for a in weights if a in beta]
+    if not common:
+        return dict(weights)
+    beta_sq_sum = sum(beta[a] ** 2 for a in common)
+    if beta_sq_sum <= 0:
+        return dict(weights)
+    w_dot_beta = sum(weights[a] * beta[a] for a in common)
+    k = w_dot_beta / beta_sq_sum
+    out = dict(weights)
+    for a in common:
+        out[a] = weights[a] - k * beta[a]
+    return out
+
+
+def market_betas(return_window: Dict[str, Sequence[float]]
+                 ) -> Dict[str, float]:
+    """Beta de chaque actif au marche, le marche etant la moyenne equiponderee
+    des rendements de l'univers a chaque instant.
+
+    Causal : n'utilise que les rendements deja realises. Un actif dont
+    l'historique est trop court est absent — jamais dote d'un beta de 1 par
+    defaut, ce qui lui pretendrait une exposition mesuree.
+    """
+    if len(return_window) < 2:
+        return {}
+    n = min(len(v) for v in return_window.values())
+    if n < 10:
+        return {}
+    aligned = {a: list(v)[-n:] for a, v in return_window.items()}
+    mkt = [statistics.fmean(aligned[a][i] for a in aligned) for i in range(n)]
+    mm = statistics.fmean(mkt)
+    var = sum((x - mm) ** 2 for x in mkt)
+    if var <= 0:
+        return {}
+    out: Dict[str, float] = {}
+    for a, rs in aligned.items():
+        ra = statistics.fmean(rs)
+        cov = sum((x - mm) * (y - ra) for x, y in zip(mkt, rs))
+        out[a] = cov / var
+    return out
 
 
 def target_weights(mu: Dict[str, float], vol: Dict[str, float],
-                   cfg: TargetConfig) -> Dict[str, float]:
+                   cfg: TargetConfig,
+                   beta: Optional[Dict[str, float]] = None) -> Dict[str, float]:
     """pi* = mu / (gamma * sigma^2), borne, neutralise, puis renormalise.
 
     L'ordre compte. Neutraliser APRES avoir borne reintroduirait un biais
@@ -173,31 +241,50 @@ def target_weights(mu: Dict[str, float], vol: Dict[str, float],
         return {a: 0.0 for a in common}
     w = {a: v / scale * cfg.max_weight for a, v in raw.items()}
 
-    if cfg.dollar_neutral and len(w) > 1:
-        avg = statistics.fmean(w.values())
-        w = {a: v - avg for a, v in w.items()}
-
-    # Remplissage par paliers : on met a l'echelle, on ecrete, et on
-    # redistribue ce que l'ecretage a retire sur les positions non saturees.
+    # NEUTRALISER PUIS METTRE A L'ECHELLE NE MARCHE PAS : la mise a
+    # l'echelle suivie de l'ecretage par actif casse les deux neutralites
+    # qu'on vient d'imposer. C'est le defaut qui laissait le livre porter
+    # une exposition nette de +0,054 et un beta de +0,111 alors qu'il se
+    # croyait neutre.
     #
-    # L'ordre naif — mettre a l'echelle PUIS ecreter — detruisait le levier
-    # demande sans le dire : avec 4 actifs et max_weight=0,10, un brut de 2,0
-    # ressortait a 0,4. Le plafond par actif DOIT gagner, c'est une borne de
-    # risque ; mais il doit gagner visiblement, pas en annulant silencieusement
-    # le parametre d'a cote.
-    #
-    # Le brut atteignable est borne par max_weight x nombre d'actifs. Au-dela,
-    # la fonction rend le maximum atteignable, jamais davantage.
-    for _ in range(8):
+    # On itere donc : neutraliser, mettre a l'echelle, ecreter, recommencer.
+    # L'ecretage est une borne de RISQUE et gagne toujours ; la neutralite
+    # est retablie a chaque tour et converge des que l'ecretage ne mord plus.
+    for _ in range(12):
+        if cfg.beta_neutral and beta:
+            w = neutralise_beta(w, beta)
+        if cfg.dollar_neutral and len(w) > 1:
+            avg = statistics.fmean(w.values())
+            w = {a: v - avg for a, v in w.items()}
         gross = sum(abs(v) for v in w.values())
         if gross <= 0:
             break
         k = cfg.gross_leverage / gross
-        w = {a: max(-cfg.max_weight, min(cfg.max_weight, v * k))
-             for a, v in w.items()}
-        if abs(sum(abs(v) for v in w.values()) - cfg.gross_leverage) < 1e-12:
-            break
+        clipped = {a: max(-cfg.max_weight, min(cfg.max_weight, v * k))
+                   for a, v in w.items()}
+        if all(abs(clipped[a] - w[a] * k) < 1e-15 for a in w):
+            w = clipped
+            break                      # l'ecretage ne mord plus : converge
+        w = clipped
     return w
+
+
+def exposures(weights: Dict[str, float],
+              beta: Optional[Dict[str, float]] = None) -> Dict[str, float]:
+    """Expositions residuelles du livre. Sert a VERIFIER, pas a decider.
+
+    Un livre qui se croit neutre et ne l'est pas est pire qu'un livre
+    directionnel assume : il attribue a son signal une performance qui vient
+    du marche.
+    """
+    out = {
+        "brut": sum(abs(v) for v in weights.values()),
+        "net_dollar": sum(weights.values()),
+    }
+    if beta:
+        common = [a for a in weights if a in beta]
+        out["net_beta"] = sum(weights[a] * beta[a] for a in common)
+    return out
 
 
 def max_reachable_gross(n_assets: int, cfg: TargetConfig) -> float:
