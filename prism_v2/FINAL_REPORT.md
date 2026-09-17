@@ -1,5 +1,12 @@
 # EDGE_HUNT — Rapport final de clôture (A–AI)
 
+> **PÉRIMÉ EN PARTIE — voir `EXPERIMENT_REPORT.md`.**
+> Ce document reste valide pour l'audit d'ARCHITECTURE (sections A–E, G–U,
+> X–AI). Ses sections **F (Open Discovery)** et **V/W (runs et variance
+> 161→0)** ont été remplacées : le verdict Open Discovery est désormais
+> MESURÉ et non plus écrit en dur, et l'expérience de 6,5 h remplace les
+> quatre runs de sept minutes.
+
 Commit de référence : voir `git log -1` à la fin du document.
 Branche : `claude/v2-project-reconstruction-66p4nx`.
 Tous les chiffres de ce rapport ont été relus dans le code ou dans les

@@ -139,7 +139,17 @@ class MarketObservatory:
         backoff = 1.0
         client = None
         try:
-            with gzip.open(path, "at", encoding="utf-8") as fh:
+            # Mode ECRITURE, jamais APPEND. Ajouter derriere un flux gzip
+            # tronque — celui d'une collecte precedente interrompue — produit
+            # un flux illisible a la jonction : le decompresseur standard
+            # s'arrete la, et six heures de collecte deviennent 0.3 h.
+            if path.exists() and path.stat().st_size:
+                backup = path.with_suffix(path.suffix + f".{int(time.time())}.bak")
+                path.rename(backup)
+                stats.errors.append(
+                    f"fichier existant deplace vers {backup.name} : on n'ajoute "
+                    "jamais derriere un flux gzip potentiellement tronque")
+            with gzip.open(path, "wt", encoding="utf-8") as fh:
                 fh.write(json.dumps({
                     "_meta": True, "started_at": stats.started_at,
                     "snapshot_ms": self.snapshot_ms,
@@ -321,7 +331,9 @@ def load_snapshots(path: Path, inst_id: Optional[str] = None,
     SIGNALE dans `meta["truncated"]`. Une ligne partielle en queue est
     ignoree, jamais devinee.
     """
-    opener = gzip.open if str(path).endswith(".gz") else open
+    if str(path).endswith(".gz"):
+        return _load_gzip_members(path, inst_id, max_records)
+    opener = open
     meta: Dict[str, Any] = {}
     out: List[Dict[str, Any]] = []
     truncated = False
@@ -356,6 +368,94 @@ def load_snapshots(path: Path, inst_id: Optional[str] = None,
         truncated = True
         meta["truncation_reason"] = f"{type(exc).__name__}: {exc}"[:120]
     meta["truncated"] = truncated
+    meta["n_loaded"] = len(out)
+    out.sort(key=lambda r: r.get("ts") or 0)
+    return meta, out
+
+
+#: Signature d'un en-tete gzip avec methode deflate.
+_GZIP_MAGIC = b"\x1f\x8b\x08"
+
+
+def _load_gzip_members(path: Path, inst_id: Optional[str],
+                       max_records: Optional[int]
+                       ) -> tuple[Dict[str, Any], List[Dict[str, Any]]]:
+    """Lit un .gz en RESYNCHRONISANT sur chaque membre gzip.
+
+    Un fichier peut contenir plusieurs flux concatenes, dont un tronque : le
+    decompresseur standard s'arrete au premier defaut et abandonne tout ce qui
+    suit. Ici on repere chaque en-tete gzip, on decompresse chacun
+    independamment, et on garde ce qui est lisible.
+
+    Les en-tetes sont cherches par signature : certains ne sont que des octets
+    ressemblants au milieu de donnees compressees. Un candidat qui ne
+    decompresse pas est simplement ignore, jamais force.
+    """
+    raw = Path(path).read_bytes()
+    offsets: List[int] = []
+    i = raw.find(_GZIP_MAGIC)
+    while i != -1:
+        offsets.append(i)
+        i = raw.find(_GZIP_MAGIC, i + 1)
+
+    meta: Dict[str, Any] = {}
+    out: List[Dict[str, Any]] = []
+    members_read = 0
+    members_failed = 0
+    members_incomplete = 0
+    for off in offsets:
+        d = zlib.decompressobj(31)          # 31 = gzip
+        try:
+            text = d.decompress(raw[off:]).decode("utf-8", errors="ignore")
+        except (zlib.error, OSError):
+            members_failed += 1
+            continue
+        if not text:
+            members_failed += 1
+            continue
+        members_read += 1
+        # `eof` dit si le marqueur de fin du membre a ete atteint. Un membre
+        # tronque se decompresse SANS lever : sans ce controle, une collecte
+        # coupee passerait pour complete.
+        if not d.eof:
+            members_incomplete += 1
+        for line in text.splitlines():
+            if not line.strip():
+                continue
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                continue                    # ligne partielle : ignoree
+            if rec.get("_meta"):
+                if not meta:
+                    meta.update(rec)
+                meta.setdefault("all_sessions", []).append(
+                    rec.get("started_at"))
+                continue
+            if inst_id is not None and rec.get("i") != inst_id:
+                continue
+            if not rec.get("ok"):
+                continue
+            out.append(rec)
+            if max_records is not None and len(out) >= max_records:
+                break
+        if max_records is not None and len(out) >= max_records:
+            break
+    # Deux sessions de collecte dans un meme fichier n'ont ni les memes
+    # instruments, ni forcement la meme cadence, et leurs fenetres peuvent se
+    # chevaucher. Les melanger silencieusement produirait une serie qui ne
+    # correspond a aucune observation reelle.
+    sessions = [x for x in (meta.get("all_sessions") or []) if x]
+    if len(set(sessions)) > 1:
+        meta["multiple_sessions"] = sorted(set(sessions))
+        raise ValueError(
+            f"{path}: {len(set(sessions))} sessions de collecte distinctes "
+            f"({sorted(set(sessions))}). Les melanger produirait une serie qui "
+            "ne correspond a aucune observation reelle. Separer les fichiers.")
+    meta["gzip_members_read"] = members_read
+    meta["gzip_members_unreadable"] = members_failed
+    meta["gzip_members_incomplete"] = members_incomplete
+    meta["truncated"] = members_failed > 0 or members_incomplete > 0
     meta["n_loaded"] = len(out)
     out.sort(key=lambda r: r.get("ts") or 0)
     return meta, out

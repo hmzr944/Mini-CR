@@ -61,6 +61,8 @@ class SnapshotSeries:
     inst_id: str
     _ts: List[int] = field(default_factory=list)
     _recs: List[Dict[str, Any]] = field(default_factory=list)
+    #: (calculee, valeur) — memorisation de la cadence, voir cadence_ms().
+    _cadence_cached: Optional[Tuple[bool, Optional[float]]] = None
 
     @classmethod
     def from_records(cls, inst_id: str,
@@ -97,12 +99,24 @@ class SnapshotSeries:
         return bisect_right(self._ts, ts) - 1
 
     def cadence_ms(self) -> Optional[float]:
-        """Intervalle median entre instantanes : borne de resolution."""
-        if len(self._ts) < 2:
-            return None
-        gaps = sorted(b - a for a, b in zip(self._ts, self._ts[1:]))
-        n = len(gaps)
-        return gaps[n // 2] if n % 2 else (gaps[n // 2 - 1] + gaps[n // 2]) / 2
+        """Intervalle median entre instantanes : borne de resolution.
+
+        MEMORISE. La serie est immuable, donc cette valeur l'est aussi. La
+        recalculer a chaque appel triait les 93 600 ecarts d'une collecte de
+        six heures une fois par mesure : 440 des 450 secondes d'un profil,
+        pour un resultat identique a chaque fois.
+        """
+        if self._cadence_cached is None:
+            if len(self._ts) < 2:
+                self._cadence_cached = (False, None)
+            else:
+                gaps = sorted(b - a for a, b in zip(self._ts, self._ts[1:]))
+                n = len(gaps)
+                self._cadence_cached = (
+                    True,
+                    gaps[n // 2] if n % 2
+                    else (gaps[n // 2 - 1] + gaps[n // 2]) / 2)
+        return self._cadence_cached[1]
 
     def is_resolvable(self, delta_ms: int) -> bool:
         c = self.cadence_ms()

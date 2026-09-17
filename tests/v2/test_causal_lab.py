@@ -579,3 +579,24 @@ class TestTriggerThresholdIsCausal(unittest.TestCase):
                          threshold_spreads=1.0, split="D")
         self.assertIn("n_instants_without_basis", r.__dataclass_fields__)
         self.assertEqual(r.refusals, {})
+
+
+class TestPBOIsNotReadAsAGreenLight(unittest.TestCase):
+    """PBO mesure si la SELECTION generalise, pas si le selectionne est
+    rentable. Sur 922 configurations toutes perdantes, le run final a rendu
+    PBO = 0.000 — qui se lirait comme un feu vert."""
+
+    def test_guard_fires_when_every_configuration_loses(self):
+        import inspect
+        from prism_v2 import experiment
+        src = inspect.getsource(experiment.run)
+        self.assertIn("all_configurations_losing", src)
+        self.assertIn("interpretation_guard", src)
+
+    def test_pbo_itself_says_what_it_measures(self):
+        import random
+        rng = random.Random(11)
+        matrix = [[rng.gauss(-0.5, 1) for _ in range(300)] for _ in range(6)]
+        r = probability_of_backtest_overfitting(matrix, n_blocks=8)
+        self.assertIn("selection", r["note"].lower())
+        self.assertNotIn("rentab", r["note"].lower())

@@ -636,6 +636,13 @@ def run(obs_path: Path, latency_ms: int = DEFAULT_LATENCY_MS,
                                       "RESOLVED" if r.n_resolved else "NO_DATA")
     n_ev = sum(r.n_events for r in discovery.values())
     n_res = sum(r.n_resolved for r in discovery.values())
+    # Illustration concrete du piege des tests multiples : combien de
+    # configurations paraissent gagnantes en echantillon, et sur combien
+    # d'evenements reposent-elles ?
+    insample_pos = sorted(
+        ((r.mean(r.net_bps), r.n_resolved, r.key) for r in discovery.values()
+         if r.mean(r.net_bps) is not None and r.mean(r.net_bps) > 0),
+        reverse=True)
     print(f"configurations essayees : {len(discovery):,}")
     print(f"evenements declenches   : {n_ev:,}")
     print(f"evenements resolus      : {n_res:,}")
@@ -670,6 +677,19 @@ def run(obs_path: Path, latency_ms: int = DEFAULT_LATENCY_MS,
                   f"  net {st['mean_net_bps']:+.4f} bps"
                   f"  part brut>0 {st['share_gross_positive']:.1%}")
     report["by_bet"] = by_bet
+    if insample_pos:
+        print(f"\nconfigurations NETTES POSITIVES en echantillon : "
+              f"{len(insample_pos)} sur {len(discovery):,}")
+        for m, n, k in insample_pos[:5]:
+            print(f"   {m:+8.3f} bps  N={n:>5}  {k}")
+        solid = [x for x in insample_pos if x[1] >= MIN_TRADES]
+        print(f"   dont {len(solid)} avec au moins {MIN_TRADES} evenements"
+              + ("" if solid else " — AUCUNE : ces positives reposent sur des "
+                                  "poignees d'evenements, c'est le piege des "
+                                  "tests multiples, pas un edge"))
+    report["in_sample_positive"] = [
+        {"mean_net_bps": m, "n_resolved": n, "key": k}
+        for m, n, k in insample_pos[:20]]
     report["discovery"] = {
         "n_configurations": len(discovery), "n_events": n_ev,
         "n_resolved": n_res, "refusals": refus,
@@ -828,6 +848,28 @@ def run(obs_path: Path, latency_ms: int = DEFAULT_LATENCY_MS,
             print(f"\nPBO = {pbo['pbo']:.3f} sur {pbo['n_configurations']} "
                   f"configurations, {pbo['n_partitions']} partitions")
             print(f"  {pbo['note']}")
+            # GARDE D'INTERPRETATION. Le PBO mesure si la SELECTION en
+            # echantillon generalise. Il ne dit rien de la RENTABILITE de ce
+            # qui est selectionne. Quand toutes les configurations perdent, un
+            # PBO bas signifie seulement que le classement est stable — il
+            # reflete alors la structure de couts (quel instrument, quel
+            # spread), pas un edge. Le lire comme un feu vert serait l'erreur
+            # exacte que ce module existe pour empecher.
+            # Le « meilleur » doit avoir assez d'evenements pour vouloir dire
+            # quelque chose. Sans ce filtre, une configuration a UN evenement
+            # a +11 bps suffirait a desactiver le garde.
+            best_net = max((r.mean(r.net_bps) for r in discovery.values()
+                            if r.mean(r.net_bps) is not None
+                            and r.n_resolved >= MIN_TRADES), default=None)
+            if best_net is not None and best_net <= 0:
+                pbo["all_configurations_losing"] = True
+                pbo["interpretation_guard"] = (
+                    f"la MEILLEURE configuration perd {best_net:.3f} bps : un "
+                    "PBO bas ne signale ici qu'un classement de couts stable, "
+                    "PAS un edge robuste")
+                print(f"  ATTENTION : la meilleure configuration perd "
+                      f"{best_net:.3f} bps. Un PBO bas ne signale ici qu'un "
+                      "classement de COUTS stable, pas un edge robuste.")
     else:
         print("\nPBO non calculable : moins de 2 configurations avec >= 32 "
               "evenements. Ce n'est pas un succes, c'est une absence de mesure.")
