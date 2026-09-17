@@ -10,9 +10,9 @@ from __future__ import annotations
 import unittest
 
 from prism_v2.capital_efficiency import (
-    DAYS_PER_YEAR, HYPOTHESIS, LITERATURE, OBSERVED, Family, Objective,
-    build_report, established_families, latency_arb_counterfactual,
-    polymarket_taker_fee_bps,
+    BENCHMARK, DAYS_PER_YEAR, HYPOTHESIS, LITERATURE, OBSERVED, Family,
+    Objective, build_report, established_families, latency_arb_counterfactual,
+    polymarket_taker_fee_bps, professional_benchmark, required_leverage,
 )
 
 
@@ -142,17 +142,51 @@ class TestHonnetete(unittest.TestCase):
         self.assertEqual(netting.evidence, HYPOTHESIS)
 
     def test_chaque_famille_porte_une_source_et_un_niveau_de_preuve(self):
-        valides = {OBSERVED, LITERATURE, HYPOTHESIS}
-        for fam in established_families() + [latency_arb_counterfactual()]:
+        valides = {OBSERVED, LITERATURE, HYPOTHESIS, BENCHMARK}
+        for fam in established_families() + [professional_benchmark(),
+                                             latency_arb_counterfactual()]:
             self.assertIn(fam.evidence, valides, fam.name)
             self.assertTrue(fam.source.strip(), fam.name)
+
+    def test_le_benchmark_retient_la_fenetre_prudente(self):
+        """HLP « allTime » affiche 43,9 %/an, biaise par la croissance de
+        l'encours ; la fenetre mensuelle en donne 16 %. Retenir le chiffre
+        flatteur serait le reflexe exactement inverse de celui qu'exige ce
+        depot — donc on verrouille le prudent.
+        """
+        hlp = professional_benchmark()
+        self.assertEqual(hlp.evidence, BENCHMARK)
+        self.assertAlmostEqual(hlp.bps_per_day(), 4.38, places=2)
+        self.assertLess(hlp.bps_per_year() / 100.0, 20.0)
+
+    def test_le_plafond_professionnel_reste_loin_sous_l_objectif(self):
+        """Le vehicule le mieux place du marche n'atteint pas 0,1x. C'est la
+        preuve la plus forte du depot : ce n'est ni un backtest ni une
+        simulation, c'est du PnL realise sur 187 M\u00a0$.
+        """
+        obj = Objective(1000.0, 10.0, 365.0)
+        self.assertLess(obj.ratio_for(professional_benchmark()), 0.1)
+
+    def test_le_levier_requis_chiffre_l_ecart(self):
+        obj = Objective(1000.0, 10.0, 365.0)
+        lev = required_leverage(professional_benchmark(), obj)
+        self.assertGreater(lev, 10.0)
+        carry = [f for f in established_families()
+                 if f.name.startswith("carry inverse")][0]
+        self.assertGreater(required_leverage(carry, obj), 100.0)
+
+    def test_une_famille_perdante_n_a_pas_de_levier_salvateur(self):
+        """Multiplier une perte ne la rend pas positive."""
+        obj = Objective(1000.0, 10.0, 365.0)
+        perdante = Family("p", -5.0, 1.0, OBSERVED, "test")
+        self.assertEqual(required_leverage(perdante, obj), float("inf"))
 
     def test_seul_l_arbitrage_de_latence_recycle_vraiment(self):
         """Toutes les autres familles sont a 1 recyclage par jour. Si l'une
         d'elles gagnait un multiplicateur non justifie, son ratio exploserait
         sans qu'aucune mesure n'ait change.
         """
-        for fam in established_families():
+        for fam in established_families() + [professional_benchmark()]:
             self.assertEqual(fam.recycles_per_day, 1.0, fam.name)
         self.assertGreater(latency_arb_counterfactual().recycles_per_day, 1.0)
 

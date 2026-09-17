@@ -125,6 +125,15 @@ def established_families() -> List[Family]:
             note="le netting 20x n'est PAS confirme par OKX ; borne haute",
         ),
         Family(
+            name="funding inter-venues OKX/Hyperliquid (1x, taker)",
+            net_bps_per_cycle=-1.19,
+            recycles_per_day=1.0,
+            evidence=OBSERVED,
+            source="prism_v2/FUNDING_ARB_PROTOCOL.md — 142 actifs, 45 j",
+            note="le differentiel persiste (38,7 %/an a 24 h) mais ne couvre "
+                 "pas les 39 bps d'aller-retour ; validation 47 % de positifs",
+        ),
+        Family(
             name="maker OKX (fills passifs)",
             net_bps_per_cycle=-3.34,
             recycles_per_day=1.0,
@@ -158,6 +167,52 @@ def established_families() -> List[Family]:
             note="le markout court est aveugle au vrai risque : la resolution",
         ),
     ]
+
+
+BENCHMARK = "BENCHMARK"  # PnL realise d'un acteur tiers, pas une simulation
+
+
+def professional_benchmark() -> Family:
+    """HLP (Hyperliquid) — le plafond observable de la categorie extraction.
+
+    HLP est le vehicule le mieux place du marche crypto pour extraire de la
+    valeur sans prevision : il fait du market making, il absorbe les
+    liquidations en tant que backstop du protocole, il est opere par des
+    professionnels, et il deploie 187 M$. Son PnL est realise et verifiable
+    on-chain — ce n'est ni un backtest, ni une simulation, ni un README.
+
+    Si une strategie systematique et neutre pouvait rendre beaucoup plus que
+    cela, HLP le rendrait. C'est pourquoi ce chiffre sert de plafond et non
+    d'objectif.
+
+    On retient la fenetre MENSUELLE perp (4,38 bps/j, 16 %/an). Le chiffre
+    « allTime » de 43,9 %/an est ecarte : l'encours a cru d'un ordre de
+    grandeur sur la periode, donc rapporter le PnL cumule a un encours moyen
+    surestime le rendement. Prendre le chiffre flatteur aurait ete le
+    reflexe exactement inverse de celui qu'exige ce depot.
+    """
+    return Family(
+        name="HLP Hyperliquid (extraction professionnelle, 187 M$)",
+        net_bps_per_cycle=4.38,
+        recycles_per_day=1.0,
+        evidence=BENCHMARK,
+        source="api.hyperliquid.xyz vaultDetails — perpMonth, 30,4 j realises",
+        note="market making + backstop de liquidation, operateurs pro ; "
+             "fenetre allTime ecartee car biaisee par la croissance d'encours",
+    )
+
+
+def required_leverage(family: Family, objective: Objective) -> float:
+    """Levier necessaire pour qu'une famille atteigne l'objectif.
+
+    Le levier ne cree aucun edge : il multiplie le rendement ET le risque.
+    Cette fonction existe pour chiffrer ce que « atteindre l'objectif »
+    exigerait reellement, pas pour suggerer d'y recourir.
+    """
+    bpd = family.bps_per_day()
+    if bpd <= 0:
+        return float("inf")
+    return objective.required_bps_per_day() / bpd
 
 
 def latency_arb_counterfactual() -> Family:
@@ -204,7 +259,8 @@ def polymarket_taker_fee_bps(price: float, fee_rate: float) -> float:
 def build_report(objective: Objective) -> dict:
     required = objective.required_bps_per_day()
     rows = []
-    for fam in established_families() + [latency_arb_counterfactual()]:
+    for fam in established_families() + [professional_benchmark(),
+                                        latency_arb_counterfactual()]:
         rows.append({
             "famille": fam.name,
             "bps_par_jour": round(fam.bps_per_day(), 4),
@@ -215,6 +271,8 @@ def build_report(objective: Objective) -> dict:
             "preuve": fam.evidence,
             "source": fam.source,
             "note": fam.note,
+            "levier_requis": (None if required_leverage(fam, objective) == float("inf")
+                              else round(required_leverage(fam, objective), 1)),
         })
     rows.sort(key=lambda r: -r["bps_par_jour"])
     return {
