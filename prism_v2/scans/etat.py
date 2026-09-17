@@ -35,6 +35,16 @@ PLAFONDS = [
     # coussin ne cesse jamais de croitre, donc le levier s'effondre exactement
     # ou le cout finit de s'amortir. Critere d'abandon declare d'avance
     # (alpha >= 0,45) : applique.
+    # Couverture MEME SOUS-JACENT : alpha = 0,236 [0,215 ; 0,258] contre 0,493
+    # en correlation, coussin 45x plus petit, levier 6,8x -> 24,2x. Et pourtant
+    # l'economie BAISSE : l'allocation causale n'y capte que 0,26 a 0,82
+    # bps/jour de flux contre 6,46, et 0/15 cellules sont positives. Le levier
+    # n'etait pas le goulot.
+    Ceiling("carry meme sous-jacent (levier 24x, ABANDONNE)", -137.2,
+            NOT_PERSISTENT, 21,
+            "carry_alloc.py — 0/15 cellules positives ; alpha_peg.py pour le "
+            "coussin (alpha = 0,236)",
+            denominator=CAPITAL),
     Ceiling("flux couvert, duree optimale (MECANISME ABANDONNE)", 33.30,
             COST_DOMINATES, 30_576,
             "buffer_alpha.py — coussin mesure a 14 j, marge reelle 5,67 %, "
@@ -89,7 +99,12 @@ def build() -> Dashboard:
             "par alpha = 0,493 : le residu de couverture est une marche "
             "aleatoire, donc le coussin ne cesse jamais de croitre et le "
             "levier s'effondre exactement la ou le cout finit de s'amortir. "
-            "Un fill maker parfait ne porterait le plafond qu'a 42,6 bps/jour."),
+            "Un fill maker parfait ne porterait le plafond qu'a 42,6 bps/jour. "
+            "Le levier a ete teste comme goulot et rejete : une couverture "
+            "meme-sous-jacent donne alpha = 0,236 et un levier de 24,2x, et "
+            "l'economie y BAISSE, parce que le flux capte y vaut 0,7 bps/jour "
+            "contre 6,46. Le goulot est la PERSISTANCE du differentiel, "
+            "mesuree negative trois fois (KAITO, non-crypto, carry)."),
         next_action=(
             "AUCUNE sur ce mecanisme : abandonne selon le critere declare "
             "AVANT la mesure (alpha >= 0,45 ; mesure 0,493). Le goulot n'est "
@@ -126,6 +141,14 @@ def build() -> Dashboard:
                  "exige de vrais ordres"))
     d.add(Metric("latence reelle", None, "ms", UNKNOWN,
                  "latency_unknown() — jamais mesuree"))
+    d.add(Metric("coussin a 14 j, couverture correlation", 20.03, "%", MEASURED,
+                 "buffer_alpha.py — alpha = 0,493 [0,469 ; 0,517]"))
+    d.add(Metric("coussin a 14 j, couverture meme sous-jacent", 0.441, "%",
+                 MEASURED, "alpha_peg.py — alpha = 0,236 [0,215 ; 0,258]"))
+    d.add(Metric("historique de funding disponible", 92.0, "jours", MEASURED,
+                 "plafond de l'API OKX, uniforme sur tous les instruments"))
+    d.add(Metric("historique requis pour tester 14 j x 30 entrees", 420.0,
+                 "jours", DERIVED, "30 fenetres independantes de 14 jours"))
     d.add(Metric("probabilite de fill maker", None, "%", UNKNOWN,
                  "aucun modele de file d'attente — tout fill maker est une borne sup."))
     return d
