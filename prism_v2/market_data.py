@@ -162,6 +162,44 @@ class OKXPublicClient:
         body = self._get(path, {"instId": instrument.inst_id})
         return self._observe(path, body, instrument.inst_id)
 
+    def funding_rate_history(self, instrument: Instrument, limit: int = 100,
+                            before_ms: Optional[int] = None) -> Observation:
+        """Funding REALISE des periodes passees, pour CET instId.
+
+        `realizedRate` est le taux effectivement applique au reglement.
+        `fundingRate` est celui qui etait affiche pour la periode. Les deux
+        sont conserves : leur ecart est la seule facon de savoir ce qu'un
+        decideur pouvait connaitre AVANT le reglement.
+
+        Aucun melange d'instId : un -USD-SWAP et un -USDT-SWAP ont des taux
+        distincts, et les confondre est l'erreur que ce projet a deja payee.
+        """
+        if not instrument.inst_type.is_swap:
+            raise MarketDataError(
+                f"{instrument.inst_id} n'est pas un swap : pas de funding")
+        path = "/public/funding-rate-history"
+        params = {"instId": instrument.inst_id, "limit": str(limit)}
+        if before_ms is not None:
+            params["after"] = str(before_ms)
+        body = self._get(path, params)
+        return self._observe(path, body, instrument.inst_id)
+
+    def position_tiers(self, instrument: Instrument,
+                       td_mode: str = "cross") -> Observation:
+        """Paliers de marge PUBLICS : taux de marge initiale et taille maximale.
+
+        `imr` donne la marge exigee par palier, `maxSz` la taille au-dela de
+        laquelle le palier suivant — plus cher — s'applique. C'est une
+        contrainte de capacite imposee par l'exchange, lisible sans compte.
+        """
+        family = instrument.family or f"{instrument.base}-{instrument.quote}"
+        path = "/public/position-tiers"
+        body = self._get(path, {"instType": instrument.inst_type.value.split("_")[0]
+                                if "_" in instrument.inst_type.value else "SWAP",
+                                "tdMode": td_mode, "instFamily": family,
+                                "uly": family})
+        return self._observe(path, body, instrument.inst_id)
+
     def liquidation_orders(self, instrument: Instrument, limit: int = 100) -> Observation:
         """Liquidations publiques recentes pour la famille de l'instrument."""
         path = "/public/liquidation-orders"

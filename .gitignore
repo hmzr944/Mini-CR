@@ -46,3 +46,5 @@ prism_v2/ledger/discoveries.jsonl
 # Observatoire : sortie de collecte, volumineuse et regeneree a chaque session.
 # Le code qui la produit et la relit est versionne, pas le flux lui-meme.
 prism_v2/data/observatory/
+# Historique de funding : sortie de collecte REST, regenerable en minutes.
+prism_v2/data/funding/
