@@ -72,3 +72,61 @@ alpha/turnover** de chacun — puisque c'est la grandeur que ce test existe
 pour mesurer.
 
 Aucun cinquième signal ne sera ajouté. Aucun paramètre ne bougera.
+
+---
+
+# Résultat — aucun signal ne survit. Holdout NON ouvert.
+
+200 actifs OKX, 5 400 barres 4 h, **900 jours**. Moteur corrigé
+(neutralité dollar **et** bêta, bêtas résiduels mesurés entre 0,003 et 0,03).
+
+## Les deux fenêtres, en bps/jour (levier brut 1,0)
+
+| signal | turnover/barre | DISCOVERY 450 j | alpha/turn | VALIDATION 225 j | alpha/turn |
+|---|---:|---:|---:|---:|---:|
+| M1 MOM 7 j | 0,138 | −3,55 | +2,27 | +0,98 | +7,95 |
+| **M2 MOM 30 j** | **0,043** | **+4,21** | **+20,64** | **−7,19** | **−21,35** |
+| M3 MOM 90 j | 0,020 | −1,85 | −7,59 | +0,46 | +10,35 |
+| R1 REV 1 j | 0,439 | −26,18 | −2,78 | +3,38 | +7,82 |
+
+**Les quatre changent de signe.** M2, qui était l'hypothèse, passe de
++20,64 à −21,35 d'alpha par unité de turnover.
+
+## Benjamini-Hochberg, q = 0,10
+
+```
+R1_REV_1j     p=0.3807  ->  rejete
+M1_MOM_7j     p=0.4536  ->  rejete
+M3_MOM_90j    p=0.4753  ->  rejete
+M2_MOM_30j    p=0.8366  ->  rejete
+```
+
+Zéro survivant. **Le holdout n'est pas ouvert** : 225 jours de données OKX
+restent propres et utilisables pour un test futur. C'est le seul actif
+méthodologique que ce test produit, et il valait de ne pas le brûler.
+
+## Ce que l'hypothèse valait — et ce qu'elle ne valait pas
+
+Le diagnostic du turnover était **juste** : M2 tourne 2,8× moins que M1 et
+conserve plus d'alpha brut. Le mécanisme est réel et mesuré.
+
+Mais le mécanisme ne suffit pas. Réduire le coût ne sert à rien si le signal
+n'a pas de signe stable — et il n'en a pas. Le ratio alpha/turnover de M2
+s'inverse complètement d'une fenêtre à l'autre.
+
+## Le constat qui revient pour la troisième fois
+
+| test | données | résultat |
+|---|---|---|
+| Portefeuille carry | 45 j HL | holdout **négatif** |
+| 4 signaux pré-enregistrés | 840 j HL | holdout **négatif** |
+| 4 vitesses de momentum | 900 j OKX, moteur corrigé | **aucun survivant BH** |
+
+Trois protocoles gelés, trois jeux de données, deux venues, un moteur
+vérifié propre, une correction de justesse appliquée entre-temps. **Ce qui
+brille en discovery s'inverse systématiquement ensuite.** Ce n'est plus un
+accident de fenêtre : c'est la propriété du domaine.
+
+Les signaux transversaux sur perpétuels crypto n'ont pas de signe stable à
+ces horizons. La performance de discovery est de la chance de régime, et
+aucune correction de moteur ne la transforme en edge.
