@@ -237,3 +237,41 @@ class TestPriceBucketsSeparateTheTwoDocumentedExtremes(unittest.TestCase):
         rebate_mid = m.maker_rebate_per_share(0.50)
         rebate_fav = m.maker_rebate_per_share(0.90)
         self.assertGreater(rebate_mid, rebate_fav * 2)
+
+
+class TestDegenerateMarkoutIsRefusedNotReported(unittest.TestCase):
+    """Defaut reel trouve sur donnees collectees : 97,3 % des markouts a 60 s
+    valaient EXACTEMENT zero. La mesure rendait alors « demi-spread encaisse,
+    aucune adverse selection » — un resultat positif qui ne mesurait AUCUN
+    risque. Un outil qui produit un chiffre dans ce cas invite a le publier.
+    """
+
+    def test_all_zero_markouts_are_flagged_degenerate(self):
+        from prism_v2.poly_markout import markout_is_degenerate
+        deg, share = markout_is_degenerate([0.0] * 100)
+        self.assertTrue(deg)
+        self.assertEqual(share, 1.0)
+
+    def test_a_moving_market_is_not_flagged(self):
+        from prism_v2.poly_markout import markout_is_degenerate
+        deg, share = markout_is_degenerate([0.001 * i for i in range(1, 101)])
+        self.assertFalse(deg)
+        self.assertEqual(share, 0.0)
+
+    def test_empty_input_is_degenerate_never_optimistic(self):
+        from prism_v2.poly_markout import markout_is_degenerate
+        self.assertTrue(markout_is_degenerate([])[0])
+
+    def test_threshold_is_explicit_and_conservative(self):
+        from prism_v2.poly_markout import DEGENERATE_ZERO_SHARE
+        self.assertLessEqual(DEGENERATE_ZERO_SHARE, 0.75)
+
+    def test_sign_flip_is_voided_when_the_measurement_is_degenerate(self):
+        """Le verdict sur le rebate doit etre ANNULE, pas simplement
+        accompagne d'un avertissement : un net positif obtenu sur un mid gele
+        ne dit rien du rebate."""
+        import inspect
+        from prism_v2 import poly_markout
+        src = inspect.getsource(poly_markout.run)
+        self.assertIn("void_reason", src)
+        self.assertIn('"rebate_flips_the_sign": None', src)

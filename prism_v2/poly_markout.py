@@ -120,6 +120,30 @@ def load_books(path: Path) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
     return meta, out
 
 
+#: Part de markouts EXACTEMENT nuls au-dela de laquelle la mesure est
+#: degeneree : le mid n'a pas bouge, donc le markout ne mesure RIEN.
+DEGENERATE_ZERO_SHARE = 0.60
+
+
+def markout_is_degenerate(markouts: Sequence[float]) -> Tuple[bool, float]:
+    """Le markout mesure-t-il quelque chose, ou un carnet gele ?
+
+    DEFAUT REEL. Sur les marches de prediction collectes, 97,3 % des markouts
+    a 60 s valaient EXACTEMENT zero : le mid ne bouge pas a cette resolution.
+    La mesure rendait alors « demi-spread encaisse, aucune adverse selection »,
+    c'est-a-dire un resultat positif qui ne mesurait aucun risque.
+
+    Le risque reel d'un contrat binaire n'est pas la derive du mid a 60 s :
+    c'est le reglement terminal a 0 ou 1 dollar. Un markout court y est
+    structurellement AVEUGLE. Un outil qui rend un chiffre dans ce cas
+    invite a le publier.
+    """
+    if not markouts:
+        return True, 1.0
+    share = sum(1 for x in markouts if x == 0.0) / len(markouts)
+    return share >= DEGENERATE_ZERO_SHARE, share
+
+
 def _stats(xs: Sequence[float]) -> Dict[str, Any]:
     n = len(xs)
     if n == 0:
@@ -225,6 +249,26 @@ def run(books_path: Path = DEFAULT_BOOKS, markets_path: Path = DEFAULT_MARKETS,
         report["finished_at"] = utc_now_iso()
         return report
 
+    # GARDE — avant tout chiffre, la mesure mesure-t-elle quelque chose ?
+    mo_all = [f.markout[HORIZONS_S[0]] for f in all_fills
+              if HORIZONS_S[0] in f.markout]
+    degenerate, zero_share = markout_is_degenerate(mo_all)
+    report["markout_degenerate"] = {"zero_share": zero_share,
+                                    "degenerate": degenerate,
+                                    "threshold": DEGENERATE_ZERO_SHARE}
+    if degenerate:
+        print(f"MESURE DEGENEREE : {zero_share:.1%} des markouts a "
+              f"{HORIZONS_S[0]} s valent EXACTEMENT zero.")
+        print("  Le mid ne bouge pas a cette resolution. Le markout ne mesure")
+        print("  donc AUCUN risque, et le « net » qui suit n'est qu'un")
+        print("  demi-spread encaisse sur un carnet gele.")
+        print()
+        print("  Le risque reel d'un contrat binaire est le REGLEMENT terminal")
+        print("  a 0 ou 1 dollar, auquel un markout de 60 s est structurellement")
+        print("  aveugle. Les chiffres ci-dessous sont affiches pour diagnostic,")
+        print("  PAS comme un resultat economique.")
+        print()
+
     print(f"{'horizon':>9}{'N':>7}{'demi-spread':>14}{'markout':>11}"
           f"{'rebate':>10}{'NET':>11}{'t':>8}{'part>0':>9}")
     print("-" * 79)
@@ -269,7 +313,15 @@ def run(books_path: Path = DEFAULT_BOOKS, markets_path: Path = DEFAULT_MARKETS,
     flipped = (a["mean"] is not None and b["mean"] is not None
                and a["mean"] <= 0 < b["mean"])
     print()
-    if flipped:
+    if degenerate:
+        print("  SANS OBJET : la mesure est degeneree (voir ci-dessus). Un net")
+        print("  positif obtenu sur un mid gele ne dit rien du rebate, ni de")
+        print("  l'adverse selection, ni de la rentabilite.")
+        report["sign_flip"] = {"horizon_s": h, "without_rebate": a,
+                               "with_rebate": b,
+                               "rebate_flips_the_sign": None,
+                               "void_reason": "markout degenere"}
+    elif flipped:
         print("  LE REBATE CHANGE LE SIGNE. C'est la premiere fois qu'une")
         print("  equation maker devient positive dans ce projet.")
         print("  A ATTAQUER avant toute conclusion : selection des marches,")
@@ -280,8 +332,10 @@ def run(books_path: Path = DEFAULT_BOOKS, markets_path: Path = DEFAULT_MARKETS,
     else:
         print("  Le rebate ne suffit PAS a changer le signe.")
         print("  L'adverse selection depasse le demi-spread ET le rebate reunis.")
-    report["sign_flip"] = {"horizon_s": h, "without_rebate": a,
-                           "with_rebate": b, "rebate_flips_the_sign": flipped}
+    if not degenerate:
+        report["sign_flip"] = {"horizon_s": h, "without_rebate": a,
+                               "with_rebate": b,
+                               "rebate_flips_the_sign": flipped}
 
     print(); print("=" * 84)
     print("4. DEUX EFFETS QUI NE SE RECOUVRENT PAS"); print("=" * 84)
