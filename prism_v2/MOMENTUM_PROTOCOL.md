@@ -124,9 +124,29 @@ s'inverse complètement d'une fenêtre à l'autre.
 
 Trois protocoles gelés, trois jeux de données, deux venues, un moteur
 vérifié propre, une correction de justesse appliquée entre-temps. **Ce qui
-brille en discovery s'inverse systématiquement ensuite.** Ce n'est plus un
-accident de fenêtre : c'est la propriété du domaine.
+brille en discovery s'inverse systématiquement ensuite.**
 
-Les signaux transversaux sur perpétuels crypto n'ont pas de signe stable à
-ces horizons. La performance de discovery est de la chance de régime, et
-aucune correction de moteur ne la transforme en edge.
+## Ce qui est démontré, et ce qui ne l'est pas
+
+J'avais écrit ici « c'est la propriété du domaine ». **C'était une
+surinterprétation, et je la retire.**
+
+**Démontré :** les familles de signaux testées — carry, momentum de série
+temporelle, retournement — sur perpétuels crypto, avec *ces* données, *ces*
+horizons (1 à 90 jours), *ces* univers (161 actifs HL, 200 actifs OKX), *ces*
+coûts (6,54 bps par unité de turnover) et *cette* construction de
+portefeuille (transversale, neutre dollar et bêta), **n'ont pas démontré
+d'edge stable hors échantillon.** C'est un résultat fort et il suffit à
+fermer cette branche.
+
+**Non démontré :** qu'aucun edge n'existe dans les perpétuels crypto. Je n'ai
+exploré ni la microstructure fine, ni les options, ni les spreads
+inter-échéances, ni l'événementiel, ni la dynamique de liquidation, ni les
+contraintes de collatéral, ni la structure de base, ni le flux d'ordres
+spécifique, ni l'information exogène, ni les mécaniques de settlement. La
+distance entre « ces familles-là échouent » et « le domaine est vide » est
+énorme, et rien dans mes mesures ne la franchit.
+
+Arrêter cette branche est rationnel. Déclarer le domaine impossible serait
+prématuré — et serait exactement le genre de conclusion trop large que ce
+dépôt existe pour empêcher.
