@@ -36,6 +36,12 @@ MINUTE_MS = 60_000
 
 # Parametres GELES par le protocole. Les modifier invalide le test.
 TRAILING_MINUTES = 1_440          # 24 h de reference glissante
+#: Nombre minimal de minutes ACTIVES avant qu'une reference soit publiee.
+#: Seconde moitie du defaut corrige : exiger 1 440 observations alors qu'on
+#: ne compte que les minutes actives rendait la reference eternellement
+#: « pas prete ». 30 est le minimum conventionnel pour une statistique
+#: d'ordre stable ; il est declare ici et n'a pas ete choisi sur un resultat.
+MIN_ACTIVE_MINUTES = 30
 IMBALANCE_THRESHOLD = 0.50
 AMPLITUDE_THRESHOLD = 5.0
 HOLD_MINUTES = 30
@@ -104,10 +110,14 @@ class TrailingMedian:
     declenchements au demarrage.
     """
 
-    def __init__(self, window: int = TRAILING_MINUTES):
+    def __init__(self, window: int = TRAILING_MINUTES,
+                 min_observations: int = MIN_ACTIVE_MINUTES):
         if window < 1:
             raise ValueError("fenetre < 1")
+        if min_observations < 1:
+            raise ValueError("min_observations < 1")
         self.window = window
+        self.min_observations = min_observations
         self._q: Deque[float] = deque()
         self._sorted: List[float] = []
 
@@ -121,7 +131,12 @@ class TrailingMedian:
 
     @property
     def ready(self) -> bool:
-        return len(self._q) >= self.window
+        """Prete des `min_observations` valeurs, pas des `window`.
+
+        La fenetre borne ce qu'on RETIENT ; le minimum borne ce a partir de
+        quoi on ose publier une mediane.
+        """
+        return len(self._q) >= self.min_observations
 
     def value(self) -> Optional[float]:
         if not self.ready:
@@ -145,9 +160,20 @@ def scan_instrument(instrument: str, flows: Dict[int, MinuteFlow],
                     minutes: Sequence[int]) -> List[Trigger]:
     """Applique la regle gelee, minute par minute, causalement.
 
-    `minutes` doit etre la grille complete et triee : les minutes SANS flux
-    comptent comme zero dans la mediane de reference, sans quoi la reference
-    ne decrirait que les minutes agitees et rien ne paraitrait jamais ample.
+    LA REFERENCE PORTE SUR LES MINUTES ACTIVES, ET C'EST UNE CORRECTION.
+    La premiere redaction faisait compter les minutes sans flux comme zero.
+    Sur des liquidations eparses — ce qu'elles sont : meme un instrument a
+    1 273 liquidations n'a de flux que sur 167 minutes sur 1 440 — la mediane
+    de toutes les minutes vaut ZERO, l'ampleur devient indefinie, et la regle
+    ne se declenche JAMAIS. Elle aurait produit zero declenchement pendant
+    quatorze jours et fait conclure « aucune opportunite » : un faux negatif
+    silencieux.
+
+    La mediane porte donc sur les minutes ou il y a eu du flux, ce qui est
+    aussi la definition employee par la mesure exploratoire. L'ampleur repond
+    alors a « ce flux est-il gros pour une bouffee de liquidations de cet
+    instrument », question bien posee quelle que soit la rarete des
+    evenements.
     """
     med = TrailingMedian(TRAILING_MINUTES)
     out: List[Trigger] = []
@@ -162,9 +188,11 @@ def scan_instrument(instrument: str, flows: Dict[int, MinuteFlow],
                 if abs(imb) >= IMBALANCE_THRESHOLD and amp >= AMPLITUDE_THRESHOLD:
                     out.append(Trigger(instrument, m, imb, amp,
                                        1 if imb > 0 else -1, total))
-        med.push(total)
+        if total > 0:
+            med.push(total)
         # La minute courante n'entre dans la reference qu'APRES avoir servi :
-        # sinon un flux enorme se normaliserait par lui-meme.
+        # sinon un flux enorme se normaliserait par lui-meme. Et seules les
+        # minutes ACTIVES y entrent, pour la raison expliquee plus haut.
     return out
 
 

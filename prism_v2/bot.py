@@ -109,6 +109,35 @@ class FundingObservation:
     book: Optional[OrderBook] = None
     capacity_usd: Optional[float] = None
 
+    def to_context(self) -> MarketContext:
+        return MarketContext(
+            instrument=self.spec, book=self.book,
+            funding={"long_venue": self.near, "short_venue": self.far},
+            extras={"capacity_usd": self.capacity_usd})
+
+
+@dataclass
+class FlowObservation:
+    """Un actif et son etat de flux force, a un instant.
+
+    `book` est le carnet REEL au moment du declenchement. C'est la grandeur
+    que ce type d'observation existe pour porter : la profondeur et le spread
+    a l'instant precis ou le flux force frappe sont invisibles dans toute
+    rediffusion historique, et ils decident si le deplacement de prix est
+    capturable ou seulement visible.
+    """
+    symbol: str
+    spec: InstrumentSpec
+    flow: Any                   # ForcedFlowState
+    book: Optional[OrderBook] = None
+    capacity_usd: Optional[float] = None
+
+    def to_context(self) -> MarketContext:
+        return MarketContext(
+            instrument=self.spec, book=self.book,
+            extras={"forced_flow": self.flow,
+                    "capacity_usd": self.capacity_usd})
+
 
 class Bot:
     """Boucle de criblage. Aucune dependance reseau en dur : la collecte est
@@ -118,11 +147,13 @@ class Bot:
                  ledger=None, min_abs_apr: float = 0.20,
                  horizon_h: int = 168,
                  notional_usd: float = 1_000.0,
-                 executor=None):
+                 executor=None, registry=None):
         self.feed = feed
-        self.registry = OpportunityRegistry().register(
-            FundingSpreadOpportunity(min_abs_apr=min_abs_apr,
-                                     horizon_h=horizon_h))
+        if registry is None:
+            registry = OpportunityRegistry().register(
+                FundingSpreadOpportunity(min_abs_apr=min_abs_apr,
+                                         horizon_h=horizon_h))
+        self.registry = registry
         self.risk = risk or RiskGate(RiskLimits())
         self.ledger = ledger
         self.notional_usd = notional_usd
@@ -146,13 +177,8 @@ class Bot:
                 rep.errors.append(f"{obs.symbol}: {type(exc).__name__}: {exc}")
         return rep
 
-    def _process(self, obs: FundingObservation, rep: CycleReport) -> None:
-        ctx = MarketContext(
-            instrument=obs.spec,
-            book=obs.book,
-            funding={"long_venue": obs.near, "short_venue": obs.far},
-            extras={"capacity_usd": obs.capacity_usd},
-        )
+    def _process(self, obs, rep: CycleReport) -> None:
+        ctx = obs.to_context()
         results = self.registry.detect_all(ctx)
         for name, res in results.items():
             if res.status is DetectionStatus.INSUFFICIENT_DATA:
@@ -169,8 +195,7 @@ class Bot:
                 rep.n_detected += 1
                 self._evaluate_and_maybe_execute(cand, obs, rep)
 
-    def _evaluate_and_maybe_execute(self, cand: Candidate,
-                                    obs: FundingObservation,
+    def _evaluate_and_maybe_execute(self, cand: Candidate, obs,
                                     rep: CycleReport) -> None:
         if obs.book is None:
             # Sans carnet on ne peut chiffrer ni spread ni impact. On ne
@@ -200,8 +225,9 @@ class Bot:
             obs.book, side, self.notional_usd,
             style=ExecutionStyle.TAKER, strict_fees=False, legs=4,
             latency=latency_not_applicable(
-                "le haircut de decroissance mesure integre une entree a t+1h ; "
-                "horizon 168 h"),
+                "l'esperance mesuree integre deja le delai d'observation : "
+                "entree a t+1h pour le funding, a la cloture de la minute "
+                "pour le flux force"),
             funding=funding_not_applicable(
                 "le funding net EST la capture de cette famille, deja compte "
                 "dans gross_capture_bps"),

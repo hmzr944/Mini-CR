@@ -66,8 +66,12 @@ class TestAgregation(unittest.TestCase):
 
 class TestMedianeCausale(unittest.TestCase):
 
-    def test_la_mediane_ne_sort_rien_tant_que_la_fenetre_n_est_pas_pleine(self):
-        m = TrailingMedian(window=5)
+    def test_rien_ne_sort_avant_le_minimum_d_observations(self):
+        """La fenetre borne ce qu'on RETIENT ; le minimum borne ce a partir
+        de quoi on ose publier une mediane. Confondre les deux rendait la
+        reference eternellement indisponible des lors qu'on ne comptait que
+        les minutes actives."""
+        m = TrailingMedian(window=1_000, min_observations=5)
         for _ in range(4):
             m.push(1.0)
             self.assertIsNone(m.value())
@@ -75,13 +79,18 @@ class TestMedianeCausale(unittest.TestCase):
         self.assertIsNotNone(m.value())
 
     def test_la_mediane_glisse(self):
-        m = TrailingMedian(window=3)
+        m = TrailingMedian(window=3, min_observations=3)
         for v in (1.0, 1.0, 1.0):
             m.push(v)
         self.assertAlmostEqual(m.value(), 1.0)
         for v in (10.0, 10.0, 10.0):
             m.push(v)
         self.assertAlmostEqual(m.value(), 10.0)
+
+    def test_le_minimum_par_defaut_est_declare(self):
+        from prism_v2.liquidation_flow import MIN_ACTIVE_MINUTES
+        self.assertEqual(MIN_ACTIVE_MINUTES, 30)
+        self.assertEqual(TrailingMedian().min_observations, MIN_ACTIVE_MINUTES)
 
     def test_fenetre_invalide_refusee(self):
         with self.assertRaises(ValueError):
@@ -126,25 +135,43 @@ class TestRegleGelee(unittest.TestCase):
         self.assertEqual(scan_instrument("X", flows,
                                          [i * M for i in range(n)]), [])
 
-    def test_les_minutes_vides_comptent_dans_la_reference(self):
-        """Une minute sans flux vaut zero dans la reference. Si seules les
-        minutes agitees comptaient, la reference decrirait l'agitation et
-        plus rien ne paraitrait ample."""
+    def test_LA_REGLE_PEUT_SE_DECLENCHER_SUR_DONNEES_EPARSES(self):
+        """Le test qui aurait attrape le defaut le plus couteux du protocole.
+
+        Les liquidations sont eparses : un instrument tres actif n'a du flux
+        que sur ~170 minutes sur 1 440. La premiere redaction faisait compter
+        les minutes vides comme zero dans la mediane ; celle-ci valait donc
+        zero partout, l'ampleur devenait indefinie, et la regle ne pouvait
+        JAMAIS se declencher — sur aucune donnee, jamais.
+
+        Elle aurait tourne quatorze jours pour rendre « aucune opportunite ».
+        Une regle qui ne peut pas se declencher n'est pas une hypothese.
+        """
         n = TRAILING_MINUTES + 5
-        dense = flat(n, total=100.0)
-        sparse = {i * M: MinuteFlow(i * M, 100.0, 0.0)
-                  for i in range(0, n, 3)}
+        flows = {}
+        for i in range(0, TRAILING_MINUTES, 8):        # 1 minute active sur 8
+            flows[i * M] = MinuteFlow(i * M, 100.0, 0.0)
         big = (TRAILING_MINUTES + 2) * M
-        for flows in (dense, sparse):
-            flows[big] = MinuteFlow(big, 1_000.0, 0.0)
-        trig_dense = scan_instrument("X", dense, [i * M for i in range(n)])
-        trig_sparse = scan_instrument("X", sparse, [i * M for i in range(n)])
-        # Sur la serie creuse la mediane est plus basse, donc le MEME flux y
-        # est plus ample : la reference tient bien compte des minutes vides.
-        self.assertTrue(trig_dense or trig_sparse)
-        if trig_dense and trig_sparse:
-            self.assertGreater(trig_sparse[0].amplitude,
-                               trig_dense[0].amplitude)
+        flows[big] = MinuteFlow(big, 5_000.0, 0.0)     # 50x la mediane active
+        trig = scan_instrument("X", flows, [i * M for i in range(n)])
+        self.assertEqual(len(trig), 1)
+        self.assertEqual(trig[0].minute_ms, big)
+        self.assertGreater(trig[0].amplitude, AMPLITUDE_THRESHOLD)
+
+    def test_la_reference_ne_compte_que_les_minutes_actives(self):
+        """Ajouter des minutes vides ne doit pas deplacer la reference."""
+        n = TRAILING_MINUTES + 5
+        big = (TRAILING_MINUTES + 2) * M
+        dense = {i * M: MinuteFlow(i * M, 100.0, 0.0)
+                 for i in range(TRAILING_MINUTES)}
+        creux = {i * M: MinuteFlow(i * M, 100.0, 0.0)
+                 for i in range(0, TRAILING_MINUTES, 8)}
+        for f in (dense, creux):
+            f[big] = MinuteFlow(big, 1_000.0, 0.0)
+        a = scan_instrument("X", dense, [i * M for i in range(n)])
+        b = scan_instrument("X", creux, [i * M for i in range(n)])
+        self.assertTrue(a and b)
+        self.assertAlmostEqual(a[0].amplitude, b[0].amplitude, places=9)
 
     def test_une_reference_nulle_ne_declenche_jamais(self):
         """Lacune de specification du protocole, resolue dans le sens
@@ -158,6 +185,7 @@ class TestRegleGelee(unittest.TestCase):
         flows = {}
         big = (TRAILING_MINUTES + 2) * M
         flows[big] = MinuteFlow(big, 1_000_000.0, 0.0)
+        # Aucune minute active anterieure : la reference n'existe pas.
         self.assertEqual(scan_instrument("X", flows,
                                          [i * M for i in range(n)]), [])
 

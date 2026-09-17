@@ -106,3 +106,80 @@ Le commit de ce fichier en fait foi.
 
 Ajuster le seuil d'ampleur, l'horizon, ou l'univers après avoir vu les
 données futures. Si la règle échoue, elle échoue.
+
+---
+
+# Amendement — trois défauts trouvés en implémentant la règle
+
+Tous trois produisaient **le même résultat observable** : zéro déclenchement,
+pour toujours, sur n'importe quelle donnée. La collecte aurait tourné quatorze
+jours pour rendre « aucune opportunité » — un **faux négatif silencieux**, et
+la pire issue possible puisqu'elle est indiscernable d'un vrai résultat.
+
+## Défaut 1 — la référence dégénérait
+
+La règle gelée disait : *« les minutes SANS flux comptent comme zéro dans la
+médiane de référence »*. Or les liquidations sont éparses. Mesure sur les
+données réelles :
+
+| instrument | minutes actives / 1 440 | médiane TOUTES | médiane ACTIVES |
+|---|---:|---:|---:|
+| ARB-USDT-SWAP | 257 | **0,0** | 107,8 |
+| AKE-USDT-SWAP | 167 | **0,0** | 19,7 |
+| ADA-USDT-SWAP | 16 | **0,0** | 12,6 |
+
+La médiane vaut **zéro partout**, l'amplitude devient indéfinie, et ma
+résolution conservatrice (référence nulle → ne pas déclencher) désactivait
+donc la règle entière.
+
+Pire : cette rédaction **ne correspondait pas à la mesure exploratoire**, qui
+utilisait la médiane des minutes *actives*. J'avais cru rendre la règle plus
+rigoureuse en la figeant ; je l'avais rendue inopérante.
+
+**Correction :** la référence porte sur les minutes actives. C'est la
+définition réellement employée par la mesure qui a motivé l'hypothèse.
+
+## Défaut 2 — la référence n'était jamais prête
+
+`TrailingMedian` exigeait **1 440 valeurs** avant de publier une médiane. Une
+fois qu'on ne pousse plus que les minutes actives, il n'y en a jamais 1 440.
+
+**Correction :** la fenêtre borne ce qu'on *retient*, un minimum d'observations
+borne ce à partir de quoi on *ose publier*. `MIN_ACTIVE_MINUTES = 30`, le
+minimum conventionnel pour une statistique d'ordre stable. Paramètre déclaré,
+non choisi sur un résultat.
+
+## Défaut 3 — le feed perdait des minutes
+
+Le feed ne lisait que la dernière minute complète, alors qu'un cycle dure plus
+d'une minute (38 instruments × ~1,5 s). Il **sautait donc la plupart des
+minutes**, et tout flux forcé qui y tombait disparaissait sans trace.
+
+**Correction :** balayage de toutes les minutes écoulées depuis le passage
+précédent, plafonné à 30 minutes de rattrapage — au-delà on a perdu le fil, et
+rejouer davantage donnerait l'illusion d'une surveillance continue qui n'a pas
+eu lieu. Vérifié en direct : 12 minutes balayées à l'amorçage, **48 au cycle
+suivant**.
+
+Le carnet n'est collecté que pour la minute **courante** : pour une minute
+rattrapée il serait postérieur au choc et donnerait une profondeur qui
+n'existait pas à cet instant.
+
+## Ce que cet amendement coûte à la rigueur du gel
+
+Les corrections 2 et 3 sont des défauts d'implémentation : la règle voulue
+était claire, le code ne la réalisait pas. La correction 1 est plus gênante —
+**la règle écrite différait de la mesure qui l'avait motivée**, et je m'en
+aperçois après avoir vu les résultats exploratoires. Je ne peux donc pas
+prétendre que cette définition est vierge de tout biais de sélection.
+
+Ce qui reste intact : les **données futures**. Elles n'existaient pas quand la
+règle a été écrite, ne l'ont pas influencée, et ne l'influenceront pas. Le
+test confirmatoire garde toute sa valeur ; c'est la prétention à un gel parfait
+qui n'en a plus.
+
+## Garde ajoutée
+
+`test_LA_REGLE_PEUT_SE_DECLENCHER_SUR_DONNEES_EPARSES` vérifie qu'une règle
+**peut** se déclencher sur des données réalistes. Une règle qui ne peut pas se
+déclencher n'est pas une hypothèse, et rien dans le dépôt ne le vérifiait.
