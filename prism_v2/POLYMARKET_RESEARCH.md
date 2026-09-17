@@ -203,3 +203,91 @@ C'est précisément la limite que ma mesure porte : elle donne le **fill moyen**
 
 - [Makers and Takers: The Economics of the Kalshi Prediction Market (SSRN)](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=5502658)
 - [CEPR DP20631](https://cepr.org/publications/dp20631)
+
+---
+
+## 🔴 Fermée — arbitrage de latence sur les marchés crypto courts
+
+C'est la seule famille rencontrée jusqu'ici dont la **forme** correspondait
+à l'objectif : petit capital, cycle de quelques secondes, donc capital qui
+se recycle des centaines de fois par jour. Elle est fermée, et la raison
+de sa fermeture est plus instructive que la famille elle-même.
+
+**Hypothèse.** Les marchés crypto à 15 minutes de Polymarket cotent une
+probabilité dérivée du prix spot. Si le carnet Polymarket réagit plus
+lentement que Binance/Coinbase au spot, la probabilité affichée est
+observablement en retard sur une information publique. Prendre le côté
+que le spot a déjà tranché transfère de la valeur sans prévision.
+
+**Statut de l'asymétrie : 🟢 elle a réellement existé.** Ce n'est pas une
+hypothèse : la latence entre le spot et le carnet Polymarket était
+mesurable, et des portefeuilles l'ont exploitée à grande échelle. La
+presse rapporte un portefeuille passé de 313 $ à 414 k$ en un mois
+(🟡 chiffre rapporté, non vérifié par moi — je ne l'utilise pas comme
+preuve, seulement comme indication que la famille était exploitable).
+
+**Pourquoi elle est fermée — et ce n'est pas l'usure naturelle.**
+Polymarket a déployé en janvier 2026 un barème de frais *taker* dynamique
+sur ces marchés, explicitement pour neutraliser cette stratégie. Le barème
+n'est pas une taxe uniforme : c'est une contre-mesure calibrée sur la
+stratégie.
+
+```
+fee = C × feeRate × p × (1 − p)        (docs.polymarket.com/trading/fees)
+feeRate(Crypto) = 0.07
+
+à p = 0,50 :  0.07 × 0,25 = 1,75 ¢ par part
+              sur une part payée 50 ¢  →  3,5 % du capital engagé
+```
+
+La presse annonce ~3,15 % sur un contrat à 50 ¢ : cohérent avec la
+formule. Le point décisif est la **forme** de `p(1−p)` : le frais est
+**maximal exactement à 50/50**, c'est-à-dire précisément là où
+l'arbitrage de latence opérait, et il s'annule aux extrêmes, là où
+l'arbitrage n'avait rien à prendre.
+
+**Conséquence quantitative.** Un aller-retour doit capturer **plus de
+3,5 points de probabilité** avant spread, uniquement pour couvrir les
+frais. Un retard de cotation de quelques secondes sur un sous-jacent
+crypto ne déplace pas la probabilité d'un contrat 15 minutes de 3,5
+points dans le cas général ; quand il le fait, c'est sur un mouvement
+spot violent, c'est-à-dire exactement quand le carnet se vide et quand
+la sélection adverse est maximale. La distribution des opportunités et
+la distribution des coûts sont corrélées dans le mauvais sens.
+
+**Biais découvert — le plus transférable de toute cette recherche.**
+Une asymétrie observable, exploitable et *publiquement documentée* n'est
+pas un actif : c'est une dette de la plateforme. La plateforme la voit
+dans ses propres données avant n'importe quel chercheur externe, et elle
+a un instrument — le barème — qu'aucun participant ne peut contrer. La
+contre-mesure a été calibrée sur la signature de la stratégie, pas sur
+le volume global. **Toute famille dont le rendement provient d'un défaut
+corrigible par un paramètre de la venue a une durée de vie décidée par
+la venue, pas par le marché.** Cela vaut pour les frais, les limites de
+taux, les fenêtres de résolution et les règles de récompense.
+
+**Ce que je ne conclus pas.** Je ne conclus pas que l'arbitrage de
+latence est mort partout : il est mort *sur cette venue, sur ces
+marchés, à ce barème*. Une venue sans frais taker sur des marchés
+courts rouvrirait la famille — et fermerait de la même manière dès
+qu'elle deviendrait coûteuse pour elle.
+
+**Coût de la fermeture : 0 collecte, 0 expérience.** La recherche de
+mémoire d'échec a suffi : la famille était déjà tuée publiquement avant
+que j'engage la moindre donnée. C'est le protocole qui a fonctionné.
+
+**Un fil qui reste ouvert, et qui pointe ailleurs.** Ces frais taker ne
+disparaissent pas : ils **financent le Maker Rebates Program**. La venue
+a donc organisé un transfert permanent taker → maker. Cela n'ouvre pas
+la porte au market making naïf — ma mesure OKX (net −3,34 bps) et la
+littérature Kalshi (makers −10 %) disent que la sélection adverse mange
+plus que le rabais. Mais cela déplace la question : le rabais n'est pas
+une remise commerciale, c'est un budget d'incitation alimenté par un
+flux identifié. C'est une famille *extraction d'incitation*, pas une
+famille *market making*.
+
+### Sources
+
+- [Polymarket — Fees](https://docs.polymarket.com/trading/fees)
+- [Finance Magnates — Polymarket Introduces Dynamic Fees to Curb Latency Arbitrage in Short-Term Crypto Markets](https://www.financemagnates.com/cryptocurrency/polymarket-introduces-dynamic-fees-to-curb-latency-arbitrage-in-short-term-crypto-markets/)
+- [Unchained — Polymarket Introduces Taker Fees in 15-Minute Markets](https://unchainedcrypto.com/polymarket-introduces-taker-fees-in-15-minute-markets/)
