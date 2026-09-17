@@ -53,10 +53,13 @@ position, et que j'y suis arrivé sans avoir formulé pourquoi.
 
 ## Les autres faiblesses, par ordre d'importance
 
-1. **REST uniquement, aucun WebSocket.** Latence 300 ms – 1 s, résolution
-   1–2 s. Toute microstructure fine est invisible et non compétitive. C'est
-   une limite réelle, mais elle ne mord que sur des familles déjà fermées
-   par les frais.
+1. ~~**REST uniquement, aucun WebSocket.**~~ **AFFIRMATION FAUSSE, retirée.**
+   `wsclient.py` est un client RFC 6455 complet en stdlib pur, traversant le
+   proxy CONNECT, utilisé par `observatory` et `ws_collector`, avec 245 Mo
+   d'événements déjà collectés. Le défaut réel n'est pas l'absence de l'outil
+   mais son **non-usage** : j'ai mené le crible de mécanismes en REST à 6 s
+   alors que le WebSocket donne un délai de publication de **1,231 s médian
+   contre 2 434 s en REST**, soit un facteur 2 000.
 2. **Géo-blocages.** Binance et Bybit inaccessibles depuis cet
    environnement — mesuré, pas supposé. Cela ferme le lead/lag CEX et
    ampute l'univers.
