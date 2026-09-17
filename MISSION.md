@@ -109,6 +109,7 @@ fréquence, aucune finesse d'exécution ne rattrape un flux trop petit.
 | basis futures datés | 28 contrats, prix exécutables | 0,5 – **2,1** | 0,05× |
 | funding OKX médian | 92 j | 0,30 | 0,007× |
 | prime de variance (options) | 400 j de réalisé contre IV cotée | **≈ 0, signe alternant** | — |
+| funding inter-venues OKX/Hyperliquid | 60 j, 138 actifs, cadence lue période par période | médiane des p90 **6,55** | 0,15× |
 | prêt/emprunt | mesuré précédemment | négatif | — |
 
 Les futures datés méritent une note : ils ont une propriété qu'aucun perpétuel
@@ -121,6 +122,27 @@ réalisée vaut +0,9 %, −3,5 %, −3,2 %, −4,8 % aux échéances longues (le
 stables). Elle est nulle à négative : il n'y a rien à récolter, et les
 lectures positives aux échéances courtes changent de signe d'une échéance à
 l'autre — c'est du bruit, pas une prime.
+
+Le cas inter-venues méritait un test à part : un actif y garde des écarts
+énormes (KAITO, |différentiel| au-dessus du seuil 18,2 % du temps) tout en
+ayant une moyenne **signée négative**. C'est la signature d'un écart symétrique
+et événementiel, pas d'un flux — on ne détient pas une position dans les deux
+sens. Test économique, strictement causal (décider sur le différentiel déjà
+payé à `t`, encaisser de `t` à `t+N`) :
+
+| actif | coût A/R | brut réellement encaissé | net |
+|---|---|---|---|
+| KAITO | 33,5 | 0,19 – 4,83 | −28,6 à −35,1 |
+| ZORA | 39,7 | 4,29 – 16,70 | −23,0 à −35,4 |
+| MOVE | 50,2 | 0,48 – 9,05 | −41,1 à −49,7 |
+| SOPH | 66,0 | 5,61 – 16,18 | −49,9 à −60,4 |
+
+**0 cellule positive sur 26** (actif × seuil × tenue). Et le point décisif :
+**le brut encaissé ne grandit pas avec le seuil d'entrée** — KAITO donne
++0,19 bps en entrant au-dessus de 20 bps/jour, et **−1,60 bps** en entrant
+au-dessus de 100. Entrer sur des dislocations plus grandes rapporte *moins*.
+Un flux persistant paierait davantage quand il est plus grand ; celui-ci a
+déjà disparu au moment où l'on pourrait tenir la position.
 
 **Tous ces flux atterrissent entre 2 et 16 %/an.** Ce n'est pas une
 coïncidence : c'est la condition de non-arbitrage. Une position couverte

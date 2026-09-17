@@ -24,6 +24,23 @@ python -m prism_v2.scans.mm_placebo             # placebo sur l'unique survivant
 python -m prism_v2.scans.breakeven              # a quels frais le signe basculerait
 ```
 
+## Recensement des flux (capture par duree, pas par traversee)
+
+```
+python -m prism_v2.scans.funding_pairs          # carry inverse/lineaire, 15 actifs
+python -m prism_v2.scans.xvenue_funding         # OKX vs Hyperliquid, 138 actifs
+python -m prism_v2.scans.xvenue_persistence     # le SIGNE persiste-t-il assez ?
+python -m prism_v2.scans.carry_capital          # R(T) sur le capital reellement bloque
+```
+
+`carry_capital` exige `prism_v2/data/candles_1h.json` et
+`prism_v2/data/margin_tiers.json`, tous deux versionnes dans le depot.
+
+La cadence de funding est lue PERIODE PAR PERIODE, jamais par une mediane :
+OKX la change pendant les episodes de stress (6 instruments sur 138 dans la
+fenetre observee), et c'est precisement pendant ces episodes que les taux sont
+extremes. Une mediane globale y surevalue le differentiel d'un facteur 4.
+
 `ws_full` prend une dizaine de minutes : il rejoue 287 118 messages de carnet
 incrementiel avec chainage de sequence. `panel` en prend une trentaine de
 secondes de plus pour la lecture de l'observatoire.
