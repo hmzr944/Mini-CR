@@ -346,6 +346,60 @@ lui-même chuté.** C'est une tenaille, et elle se referme à 10,36.
 
 ---
 
+## 5 ter. Le plafond du mécanisme, mesuré — et son abandon
+
+Le rendement d'une position couverte s'écrit `R(T) = L(T) × (r − c/T)`. Le coût
+s'amortit quand on tient longtemps, mais le coussin de survie grandit, donc le
+levier tombe. Tout dépend de **la vitesse à laquelle il grandit** — et je
+l'avais extrapolée, pas mesurée.
+
+Hypothèse testable : si le résidu d'une paire couverte **revient** au lieu de
+dériver, le coussin cesse de croître et la tenaille s'ouvre.
+
+**Critère d'abandon déclaré avant la mesure : α ≥ 0,45 → mécanisme abandonné.**
+
+Mesuré sur 16 paires, 2 392 heures, résidus poolés, coussin lu comme le pire
+cumul *atteint* dans la fenêtre :
+
+| durée | coussin q95 | √T attendu |
+|---|---|---|
+| 1 j | 5,43 % | 5,43 % |
+| 3 j | 9,79 % | 9,41 % |
+| 7 j | 15,23 % | 14,38 % |
+| 14 j | 20,03 % | 20,33 % |
+| 20 j | 23,60 % | 24,30 % |
+
+**α = 0,493 ± 0,012, intervalle à 95 % [0,469 ; 0,517], R² = 0,9964.**
+
+0,500 est dans l'intervalle. Le résidu est une **marche aléatoire** à la
+précision de la mesure. L'hypothèse est falsifiée nettement, pas de justesse.
+
+Conséquence économique, avec la marge réelle (5,67 %) et la mutualisation
+mesurée (2,21×) :
+
+| durée | levier | R bps/jour | €/jour |
+|---|---|---|---|
+| 3 j | 9,90× | −8,0 | −0,80 |
+| 7 j | 7,96× | 26,6 | 2,66 |
+| **14 j** | **6,79×** | **33,3** | **3,33** |
+| 20 j | 6,12× | 32,8 | 3,28 |
+
+**Plafond mesuré : 33,3 bps/jour = 3,33 €/jour. Il manque un facteur 8,2.**
+
+Le critère était déclaré d'avance et il est appliqué : **mécanisme abandonné.**
+Aucune optimisation supplémentaire, y compris le fill maker — dont le plafond,
+calculé avec ce coussin mesuré, ne dépasse pas 42,6 bps/jour (4,26 €/jour,
+facteur 6,4 manquant).
+
+**Ce que ce chiffre ferme.** Le plafond est le produit de deux bornes mesurées
+dont aucune ne bouge : un flux capté de 6,46 bps/jour de notionnel, épinglé par
+l'arbitrage, et un levier de 6,8×, fixé par α = 0,493. Pour atteindre la cible
+il faudrait soit un flux 8× plus grand *et toujours couvrable* — or ce qui
+n'est pas épinglé n'est pas couvrable —, soit un coussin qui cesse de croître —
+or il croît en √T à 0,012 près.
+
+---
+
 ## 6. Réponse à la mission
 
 **Dans l'univers accessible à PRISM, aucune structure mesurable n'atteint

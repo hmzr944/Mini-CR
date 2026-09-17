@@ -28,6 +28,18 @@ PLAFONDS = [
     # LA MACHINE COMPLETE : allocation causale au plus grand differentiel
     # observe + coussin mutualise + duree de detention balayee. C'est le
     # meilleur resultat que PRISM sache produire, tout compris.
+    # PLAFOND MESURE du mecanisme « flux couvert », duree optimale incluse.
+    # buffer_alpha.py a mesure l'exposant de croissance du coussin : alpha =
+    # 0,493 +/- 0,012, intervalle [0,469 ; 0,517], R2 = 0,9964. Le residu de
+    # couverture est une MARCHE ALEATOIRE a la precision de la mesure : le
+    # coussin ne cesse jamais de croitre, donc le levier s'effondre exactement
+    # ou le cout finit de s'amortir. Critere d'abandon declare d'avance
+    # (alpha >= 0,45) : applique.
+    Ceiling("flux couvert, duree optimale (MECANISME ABANDONNE)", 33.30,
+            COST_DOMINATES, 30_576,
+            "buffer_alpha.py — coussin mesure a 14 j, marge reelle 5,67 %, "
+            "mutualisation 2,21x ; alpha = 0,493 (marche aleatoire)",
+            denominator=CAPITAL),
     Ceiling("MACHINE COMPLETE (allocation + mutualisation)", 10.36,
             COST_DOMINATES, 21,
             "alloc_policy.py — k=2, N=12 periodes ; 0/20 cellules survivent "
@@ -69,29 +81,27 @@ def build() -> Dashboard:
         best_economy_bps_per_day=best.ceiling_bps_per_day,
         best_economy_label=best.family,
         bottleneck=(
-            "MAGNITUDE BRUTE, et elle seule. La machine a capital a ete "
-            "mesuree bout en bout : l'allocation causale capte 6,5x plus de "
-            "flux que l'equiponderation (6,46 contre 1,00 bps/jour), la "
-            "mutualisation du coussin multiplie le levier par 2,21, et les "
-            "deux ensemble donnent 10,36 bps/jour de capital. Ni l'allocation, "
-            "ni le levier, ni le turnover, ni la representation ne sont le "
-            "goulot : le flux brut vaut 6,46 bps/jour contre 21,8 bps "
-            "d'aller-retour."),
+            "LE MECANISME LUI-MEME. Son plafond est desormais MESURE et non "
+            "extrapole : 33,3 bps/jour de capital (3,33 EUR/jour), atteint a "
+            "14 jours de detention. Il est le produit de deux bornes mesurees "
+            "dont aucune ne bouge — un flux capte de 6,46 bps/jour de "
+            "notionnel, epingle par l'arbitrage, et un levier de 6,8x, fixe "
+            "par alpha = 0,493 : le residu de couverture est une marche "
+            "aleatoire, donc le coussin ne cesse jamais de croitre et le "
+            "levier s'effondre exactement la ou le cout finit de s'amortir. "
+            "Un fill maker parfait ne porterait le plafond qu'a 42,6 bps/jour."),
         next_action=(
-            "Aucune action de recherche supplementaire sur cette famille. Le "
-            "cout d'aller-retour est la seule variable qui puisse encore "
-            "bouger — mesurer si un fill MAKER est atteignable sur ces "
-            "instruments, ce qui diviserait le cout par ~2,5."),
+            "AUCUNE sur ce mecanisme : abandonne selon le critere declare "
+            "AVANT la mesure (alpha >= 0,45 ; mesure 0,493). Le goulot n'est "
+            "plus une variable interne, c'est la forme economique elle-meme."),
         next_action_why=(
-            "A 21,8 bps d'aller-retour, il faut tenir 12 periodes (4 jours) "
-            "pour que le net devienne positif, et le levier a cette duree est "
-            "tombe a 6,4x. En maker (2 bps par jambe au lieu de 5), le cout "
-            "passerait a ~9,4 bps et le net deviendrait positif des 4 periodes, "
-            "ou le levier vaut encore 9x. C'est la seule variable mesurable "
-            "restante dont l'effet est d'un facteur, pas d'un pourcent. "
-            "PREALABLE : la probabilite de fill maker est INCONNUE — aucun "
-            "modele de file d'attente n'existe. C'est ce qu'il faut mesurer, "
-            "pas supposer."),
+            "Les trois formes que peut prendre un gain de marche sont "
+            "desormais bornees par des mesures independantes : capture par "
+            "TRAVERSEE (edge 1-6 bps contre 8-31 de cout, huit mesures), "
+            "capture par FLUX (33,3 bps/jour, mesure de bout en bout), "
+            "capture par le RISQUE (derive de 86 %/an requise). La seule "
+            "positive manque d'un facteur 8,2. Aucune quatrieme famille ne "
+            "sera creee au motif qu'une variable reste inconnue."),
     )
     d.add(Metric("capital disponible", 1_000.0, "EUR", OBSERVED,
                  "mandat"))
