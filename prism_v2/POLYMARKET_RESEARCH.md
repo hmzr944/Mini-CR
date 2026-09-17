@@ -147,3 +147,59 @@ pas une compétence distinctive, dans un sens comme dans l'autre.
 ### Source
 
 - [The Favorite–Longshot Bias in Prediction Markets: Evidence from Polymarket](https://arxiv.org/abs/2609.12878)
+
+---
+
+## 🟢 Vérifié — le market making en marché de prédiction perd, en moyenne
+
+**Étude Kalshi** (Bürgi, Deng, Whelan — plus de 300 000 contrats, données
+transactionnelles) :
+
+> **Les takers perdent près de 32 % en moyenne. Les makers perdent environ
+> 10 %.**
+
+C'est la preuve académique la plus directe disponible, et elle est négative.
+L'avantage du maker sur le taker est réel — **22 points de pourcentage** — mais
+il ne suffit pas à rendre l'activité profitable.
+
+L'étude confirme aussi le biais favori/longshot **sur une seconde venue**, avec
+un motif « bien plus marqué pour les takers que pour les makers ». Deux venues,
+deux jeux de données indépendants, même conclusion.
+
+### La nuance qui compte, et qui interdit de transposer directement
+
+Les « makers » de cette étude sont définis par le **type d'ordre** — ils ont
+posté des offres — et leur rendement est mesuré **jusqu'à la résolution**.
+
+Or un market maker véritable ne détient pas jusqu'à la résolution : il se
+remet à plat. Le −10 % mesure donc « les gens qui ont posté des ordres limités
+et sont restés jusqu'au bout », ce qui est une **prise de position**, pas de la
+tenue de marché.
+
+Ma mesure est différente : markout à 60 s / 300 s / 1 800 s, c'est-à-dire le
+sort d'un maker qui se remet à plat rapidement. Les deux chiffres ne sont pas
+comparables, et je ne prétendrai pas que l'un valide l'autre.
+
+Ce qu'il faut en retenir malgré tout : **la présomption de départ est
+négative**, et un résultat positif de ma mesure devra être attaqué d'autant
+plus fort.
+
+### Une tension entre deux études à ne pas trancher à la légère
+
+| source | conclusion sur les makers |
+|---|---|
+| LBS/Yale, Polymarket, 1,72 M comptes | market makers + « skilled » captent **plus de 30 %** des profits |
+| Bürgi–Deng–Whelan, Kalshi, 300 k contrats | makers **perdent ~10 %** en moyenne |
+
+Venues différentes, définitions différentes, périodes différentes. La première
+parle d'une **minorité** qui capte une part des profits ; la seconde d'une
+**moyenne** qui perd. Les deux peuvent être vraies simultanément : c'est même
+la lecture la plus naturelle, et elle dit que l'edge, s'il existe, est dans la
+queue de distribution et non dans la moyenne.
+
+C'est précisément la limite que ma mesure porte : elle donne le **fill moyen**.
+
+### Sources
+
+- [Makers and Takers: The Economics of the Kalshi Prediction Market (SSRN)](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=5502658)
+- [CEPR DP20631](https://cepr.org/publications/dp20631)
