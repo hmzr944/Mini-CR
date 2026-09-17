@@ -252,3 +252,88 @@ instruments.
   routine. Une vraie cascade se comporterait peut-être comme l'analyse le
   décrit — mais si l'edge n'existe que lors de cascades rares, la rotation du
   capital s'effondre et l'objectif échoue pour une autre raison.
+
+---
+
+# VERDICT — la prémisse est fausse. Famille fermée.
+
+## La question posée
+
+Toute la Phase C reposait sur une affirmation causale : *un ordre de
+liquidation est un ordre forcé qui POUSSE le prix, donc fournir l'immédiateté
+à ce vendeur contraint est rémunéré.*
+
+Je ne l'avais jamais testée. Je l'avais supposée.
+
+## La mesure, à la bonne résolution
+
+73 événements datés par leur **horodatage réel**, 5 instruments, prix
+échantillonnés toutes les 6 s. Mouvement du prix **dans le sens que la
+liquidation impose** :
+
+| fenêtre | moyen | t | % positif |
+|---|---:|---:|---:|
+| **avant −60 s** | **+14,55 bps** | **18,59** | **100,0 %** |
+| avant −30 s | +8,98 | 14,88 | **100,0 %** |
+| avant −6 s | +4,31 | 10,77 | 93,2 |
+| après +6 s | +0,65 | 1,37 | 52,1 |
+| après +30 s | +1,92 | 3,16 | 61,6 |
+| après +60 s | +2,97 | 2,59 | 57,5 |
+
+**Sur 100 % des événements, le prix bougeait déjà dans la direction de la
+liquidation pendant les 30 à 60 secondes qui l'ont précédée.** Rapport
+avant/après : 4,9×.
+
+## Ce que cela signifie
+
+**Le mouvement de prix cause la liquidation, pas l'inverse.** Une liquidation
+n'est pas une force qui déplace le marché : c'est un **symptôme retardé** d'un
+déplacement déjà advenu, et déjà intégré au prix quand il devient observable.
+
+Conséquence directe : conditionner sur une liquidation revient à conditionner
+sur un mouvement de prix passé. C'est-à-dire **exactement la famille
+« réversion après mouvement », fermée au tout début de ce projet sur
+617 820 événements**. La Phase C ne testait pas une famille nouvelle ; elle
+retestait la première, sous un autre nom.
+
+Et cela explique le « surdépassement » de 45 à 81 bps mesuré sur bougies
+d'une minute : ce n'était pas l'impact de la liquidation, c'était **le
+mouvement qui l'avait provoquée**, mesuré sur la même minute. Je prenais la
+cause pour l'effet.
+
+## L'économie, définitivement
+
+Ce qui suit la liquidation vaut **+2,97 bps à 60 s**, dans le sens de la
+continuation. Mon coût d'aller-retour mesuré vaut **10 à 11 bps**.
+
+```
+capture maximale observée   +2,97 bps
+coût                       -11,00 bps
+net                         -8,03 bps
+```
+
+Aucun horizon, aucun seuil, aucune exécution ne comble cet écart.
+
+## Une erreur de méthode, attrapée de justesse
+
+Ma première analyse de causalité datait chaque liquidation à l'instant où mon
+sondage la voyait. Or le délai de publication d'OKX est de **2 434 secondes en
+médiane**, jusqu'à 2,9 h : **77 % des liquidations étaient vues plus de 30 s
+après les faits**. La fenêtre « avant » contenait donc de l'après, et la
+conclusion n'avait aucune valeur.
+
+Le contrôle de délai a rattrapé l'erreur avant que j'en tire quoi que ce soit.
+Refaite sur les horodatages réels, la conclusion tient — et elle est plus
+forte. Mais elle aurait pu être fausse, et la différence entre les deux ne
+tenait qu'à une vérification de trois minutes.
+
+## Fermeture
+
+Critère 4 du protocole : *« amplitude réelle inférieure au demi-spread +
+frais, c'est-à-dire déplacement visible mais non capturable »*. Déclenché,
+mais pour une raison plus profonde que celle que j'avais anticipée : ce n'est
+pas que le déplacement n'est pas capturable, c'est qu'**il n'appartient pas à
+la liquidation**.
+
+Le test forward est arrêté. Le poursuivre quatorze jours confirmerait une
+prémisse déjà réfutée structurellement.
