@@ -288,6 +288,64 @@ enregistrements. Aucun défaut.
 
 ---
 
+## 5 bis. La machine à capital, mesurée bout en bout
+
+Le mandat (section 12) exige de chercher l'amélioration **avant** le signal :
+meilleure allocation, meilleure réutilisation du capital, meilleur turnover.
+Je n'avais jamais évalué qu'une position à la fois. Deux choses manquaient.
+
+**1. Les jambes se compensent — quand elles sont dans la même devise.** Le
+carry oppose un perp *inverse* (margé en coin) à un *linéaire* (margé en
+USDT) : les jambes ne se compensent pas. Les paires non-crypto sont **deux
+perps linéaires margés en USDT** : dans un compte en marge croisée, la perte
+de l'une est couverte par le gain de l'autre. Le coussin se dimensionne alors
+sur le *résidu*, pas sur chaque jambe.
+
+**2. Le coussin se mutualise.** Mesuré sur 16 paires et 2 391 heures :
+corrélation médiane des résidus **0,056** (p90 0,294). Coussin individuel
+moyen **14,63 %** du notionnel contre **6,61 %** pour le portefeuille
+équipondéré — **gain réel 2,21×** (contre 4,0× si les résidus étaient
+parfaitement indépendants). Le levier passe de 5,37× à **9,43×**.
+
+**3. L'allocation causale fonctionne.** Le différentiel de funding est un prix
+*affiché*, pas une prédiction : allouer aux plus grands est une décision ex
+ante légitime. Mesuré, en décidant sur le taux déjà payé à `t` et en
+encaissant de `t` à `t+N` :
+
+| k (paires retenues) | flux brut capté |
+|---|---|
+| 1 | **6,46** bps/jour |
+| 4 | 4,54 |
+| 8 | 2,59 |
+| 16 (équipondéré) | 1,00 |
+
+Concentrer capte **6,5× plus de flux**. La logique d'allocation est réelle.
+
+**Et la machine complète donne ceci :**
+
+| k | N périodes | net notionnel | levier | **net sur CAPITAL** |
+|---|---|---|---|---|
+| 1 | 1 | −58,94 | 6,52× | −384,50 |
+| 2 | 3 | −14,93 | 8,37× | −125,03 |
+| 2 | 6 | −9,46 | 7,54× | −71,38 |
+| **2** | **12** | **+1,61** | **6,44×** | **+10,36** |
+
+**3 cellules positives sur 20, 0 survivant à Benjamini-Hochberg**, et les
+trois positives ont n = 21 entrées — indistinguables de zéro.
+
+Le meilleur résultat que PRISM sache produire, tout compris, vaut donc
+**10,36 bps/jour de capital = 1,04 €/jour sur 1 000 €**, contre 20 € visés.
+**Distance : ×26.**
+
+**Ce que cela établit sur le goulot.** L'allocation est bonne (×6,5), le levier
+est bon (×2,21), le turnover est optimisé (balayé sur k et N). Aucun des trois
+n'est le goulot. Le flux brut vaut 6,46 bps/jour contre 21,8 bps
+d'aller-retour : **le levier multiplie un nombre négatif jusqu'à ce que la
+détention soit assez longue pour amortir le coût, et à cette durée il a
+lui-même chuté.** C'est une tenaille, et elle se referme à 10,36.
+
+---
+
 ## 6. Réponse à la mission
 
 **Dans l'univers accessible à PRISM, aucune structure mesurable n'atteint

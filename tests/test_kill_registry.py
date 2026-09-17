@@ -117,3 +117,39 @@ class TestRendu(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestDenominateur(unittest.TestCase):
+    """Melanger un rendement sur notionnel et un seuil sur capital est
+    l'erreur qui a fait juger le carry a 0,008x l'objectif alors que les deux
+    nombres n'avaient pas le meme denominateur."""
+
+    def test_denominateur_inconnu_refuse(self):
+        from prism_v2.kill_registry import Ceiling as C
+        with self.assertRaises(ValueError):
+            C("x", 1.0, COST_DOMINATES, 10, "m", denominator="PIB")
+
+    def test_comparer_deux_denominateurs_est_refuse(self):
+        from prism_v2.kill_registry import CAPITAL, NOTIONAL, Ceiling as C
+        c = C("x", 10.0, COST_DOMINATES, 10, "m", denominator=CAPITAL)
+        self.assertTrue(c.kills(5.0, CAPITAL))
+        with self.assertRaises(ValueError):
+            c.kills(5.0, NOTIONAL)
+
+    def test_le_crible_refuse_un_candidat_en_notionnel(self):
+        from prism_v2.kill_registry import NOTIONAL
+        with self.assertRaises(ValueError):
+            REG.screen(12.84, SEUIL, denominator=NOTIONAL)
+
+    def test_le_meilleur_connu_ignore_les_plafonds_en_notionnel(self):
+        from prism_v2.kill_registry import NOTIONAL, Ceiling as C, KillRegistry as K
+        r = K.from_list([C("sur capital", 5.0, COST_DOMINATES, 10, "m"),
+                         C("sur notionnel", 900.0, COST_DOMINATES, 10, "m",
+                           denominator=NOTIONAL)])
+        self.assertEqual(r.best_known().family, "sur capital")
+
+    def test_le_rendu_affiche_le_denominateur(self):
+        from prism_v2.kill_registry import NOTIONAL, Ceiling as C, KillRegistry as K
+        r = K.from_list([C("f", 9.0, COST_DOMINATES, 10, "m", denominator=NOTIONAL)])
+        txt = r.render(SEUIL)
+        self.assertIn("NOTIONNEL", txt)

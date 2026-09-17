@@ -28,6 +28,14 @@ NOT_PERSISTENT = "NON_PERSISTANT"            # des pointes, pas un flux
 NO_CAPACITY = "CAPACITE_INSUFFISANTE"        # trop peu de profondeur
 MEASUREMENT_INVALID = "MESURE_INVALIDE"      # la donnee ne porte pas la mesure
 
+#: Denominateur d'un rendement. Les melanger est l'erreur qui a fait croire
+#: pendant des semaines que le carry valait 0,008x l'objectif alors que le
+#: chiffre compare etait un rendement sur NOTIONNEL et le seuil un rendement
+#: sur CAPITAL. Le type le rend desormais impossible.
+CAPITAL = "CAPITAL"
+NOTIONAL = "NOTIONNEL"
+_DENOMINATORS = (CAPITAL, NOTIONAL)
+
 
 @dataclass(frozen=True)
 class Ceiling:
@@ -38,9 +46,14 @@ class Ceiling:
     reason: str
     n_observations: int
     method: str
+    denominator: str = CAPITAL
     note: str = ""
 
     def __post_init__(self) -> None:
+        if self.denominator not in _DENOMINATORS:
+            raise ValueError(f"{self.family}: denominateur inconnu "
+                             f"{self.denominator!r} — un rendement sans "
+                             f"denominateur declare n'est pas comparable")
         if self.n_observations <= 0:
             raise ValueError(f"{self.family}: un plafond sans observation "
                              f"n'est pas un plafond")
@@ -48,8 +61,18 @@ class Ceiling:
             raise ValueError(f"{self.family}: un plafond sans methode n'est "
                              f"pas verifiable")
 
-    def kills(self, candidate_bps_per_day: float) -> bool:
-        """Ce plafond condamne-t-il un candidat de la meme famille ?"""
+    def kills(self, candidate_bps_per_day: float,
+              denominator: str = CAPITAL) -> bool:
+        """Ce plafond condamne-t-il un candidat de la meme famille ?
+
+        Refuse de comparer deux rendements de denominateurs differents : le
+        levier separe les deux d'un facteur qui n'est pas 1.
+        """
+        if denominator != self.denominator:
+            raise ValueError(
+                f"{self.family}: comparaison entre un rendement sur "
+                f"{denominator} et un plafond sur {self.denominator}. "
+                f"Convertis d'abord par le levier.")
         return candidate_bps_per_day <= self.ceiling_bps_per_day
 
 
@@ -69,12 +92,14 @@ class KillRegistry:
         C'est la barre que tout nouveau candidat doit franchir pour etre le
         meilleur resultat du projet — et non simplement « prometteur ».
         """
-        if not self.ceilings:
+        capitaux = [c for c in self.ceilings.values()
+                    if c.denominator == CAPITAL]
+        if not capitaux:
             return None
-        return max(self.ceilings.values(), key=lambda c: c.ceiling_bps_per_day)
+        return max(capitaux, key=lambda c: c.ceiling_bps_per_day)
 
-    def screen(self, candidate_bps_per_day: float, threshold_bps_per_day: float
-               ) -> Dict[str, object]:
+    def screen(self, candidate_bps_per_day: float, threshold_bps_per_day: float,
+               denominator: str = CAPITAL) -> Dict[str, object]:
         """Un candidat merite-t-il du temps de recherche ?
 
         Deux questions distinctes, et les confondre est une faute :
@@ -83,6 +108,10 @@ class KillRegistry:
         Un candidat peut faire le premier sans le second : c'est un progres
         qui ne resout pas le probleme, et il doit etre nomme ainsi.
         """
+        if denominator != CAPITAL:
+            raise ValueError(
+                "le crible compare au seuil de l'objectif, qui porte sur le "
+                "CAPITAL. Convertis le candidat par son levier d'abord.")
         best = self.best_known()
         beats = (best is None or candidate_bps_per_day > best.ceiling_bps_per_day)
         reaches = candidate_bps_per_day >= threshold_bps_per_day
@@ -118,18 +147,21 @@ class KillRegistry:
                              f"echantillon")
         c = Ceiling(family=family, ceiling_bps_per_day=new_bps_per_day,
                     reason="REVISE", n_observations=n_observations,
-                    method=evidence)
+                    method=evidence,
+                    denominator=old.denominator if old else CAPITAL)
         self.ceilings[family] = c
         return c
 
     def render(self, threshold_bps_per_day: float) -> str:
-        lines = [f"{'famille':<38}{'plafond bps/j':>15}{'x objectif':>12}"
-                 f"{'n':>9}   motif",
-                 "-" * 96]
+        lines = [f"{'famille':<42}{'plafond bps/j':>15}{'sur':>10}"
+                 f"{'x objectif':>12}{'n':>9}   motif",
+                 "-" * 104]
         for c in sorted(self.ceilings.values(),
                         key=lambda x: -x.ceiling_bps_per_day):
-            lines.append(f"{c.family:<38}{c.ceiling_bps_per_day:>15.2f}"
-                         f"{c.ceiling_bps_per_day/threshold_bps_per_day:>12.4f}"
+            ratio = (f"{c.ceiling_bps_per_day/threshold_bps_per_day:>12.4f}"
+                     if c.denominator == CAPITAL else f"{'—':>12}")
+            lines.append(f"{c.family:<42}{c.ceiling_bps_per_day:>15.2f}"
+                         f"{c.denominator:>10}{ratio}"
                          f"{c.n_observations:>9,}   {c.reason}")
         b = self.best_known()
         if b:
