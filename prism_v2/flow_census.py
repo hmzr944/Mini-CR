@@ -213,3 +213,26 @@ def render(flow: Flow, curve: Sequence[Evaluation],
             lines.append(f"  -> meme la borne echoue : aucun horizon de la "
                          f"grille ne peut atteindre l'objectif.")
     return "\n".join(lines)
+
+
+def required_rate_bps_per_day(threshold_bps_per_day: float, leverage: float,
+                              round_trip_bps: float, horizon_days: float
+                              ) -> Optional[float]:
+    """Flux MINIMAL, en bps/jour de notionnel, pour atteindre l'objectif.
+
+    C'est l'inversion de R = L x (r - c/T) :
+
+        r = objectif / L + c / T
+
+    Sa valeur pratique : elle transforme « cherchons une opportunite » en un
+    CRIBLE. Tout flux dont le taux mesure est inferieur a ce seuil est elimine
+    sans etude, quel que soit son interet par ailleurs. Aucune elegance, aucune
+    frequence, aucune sophistication d'execution ne rattrape un flux trop petit,
+    parce que le seuil ne depend que de trois grandeurs observables : le levier
+    que le coussin de survie autorise, le cout d'aller-retour, et la duree.
+
+    None si le levier est nul ou negatif : sans levier il n'y a pas de position.
+    """
+    if leverage <= 0 or horizon_days <= 0:
+        return None
+    return threshold_bps_per_day / leverage + round_trip_bps / horizon_days

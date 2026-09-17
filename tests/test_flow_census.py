@@ -165,3 +165,35 @@ class TestCourbeSansSelection(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestCritereDAdmission(unittest.TestCase):
+    """Le seuil qui transforme la recherche en crible."""
+
+    def test_inverse_exactement_la_formule_du_rendement(self):
+        from prism_v2.flow_census import required_rate_bps_per_day
+        r = required_rate_bps_per_day(63.28, 3.4, 25.0, 1.0)
+        # en injectant r, on doit retomber sur l'objectif
+        self.assertAlmostEqual(3.4 * (r - 25.0 / 1.0), 63.28, places=9)
+
+    def test_plus_de_levier_abaisse_le_seuil(self):
+        from prism_v2.flow_census import required_rate_bps_per_day
+        self.assertLess(required_rate_bps_per_day(63.28, 10.0, 25.0, 1.0),
+                        required_rate_bps_per_day(63.28, 3.0, 25.0, 1.0))
+
+    def test_detention_plus_longue_abaisse_le_seuil(self):
+        from prism_v2.flow_census import required_rate_bps_per_day
+        self.assertLess(required_rate_bps_per_day(63.28, 3.0, 25.0, 10.0),
+                        required_rate_bps_per_day(63.28, 3.0, 25.0, 1.0))
+
+    def test_sans_levier_pas_de_position(self):
+        from prism_v2.flow_census import required_rate_bps_per_day
+        self.assertIsNone(required_rate_bps_per_day(63.28, 0.0, 25.0, 1.0))
+        self.assertIsNone(required_rate_bps_per_day(63.28, -1.0, 25.0, 1.0))
+        self.assertIsNone(required_rate_bps_per_day(63.28, 3.0, 25.0, 0.0))
+
+    def test_le_seuil_mesure_du_projet(self):
+        """Levier 3,4x et 25 bps d'aller-retour, mesures : ~43,6 bps/jour."""
+        from prism_v2.flow_census import required_rate_bps_per_day
+        r = required_rate_bps_per_day(63.28, 3.4, 25.0, 1.0)
+        self.assertAlmostEqual(r, 43.6, places=1)
