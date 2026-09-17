@@ -48,3 +48,5 @@ prism_v2/ledger/discoveries.jsonl
 prism_v2/data/observatory/
 # Historique de funding : sortie de collecte REST, regenerable en minutes.
 prism_v2/data/funding/
+# Observatoire Polymarket : sortie de collecte.
+prism_v2/data/polymarket/
