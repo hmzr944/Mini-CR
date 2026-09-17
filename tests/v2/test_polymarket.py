@@ -170,3 +170,47 @@ class TestMakerFillAccounting(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestBookSeriesRefusesStaleAndBrokenBooks(unittest.TestCase):
+    """La reference de carnet est ce qui distingue cette mesure du raccourci
+    historique ecarte : elle doit etre fraiche, sinon elle mesure la derive."""
+
+    def _recs(self):
+        return [
+            {"i": "t1", "ok": True, "recv": 1_000_000, "b": [[0.40, 100]],
+             "a": [[0.42, 100]]},
+            {"i": "t1", "ok": False, "recv": 1_010_000},          # illisible
+            {"i": "t1", "ok": True, "recv": 1_020_000, "b": [[0.45, 100]],
+             "a": [[0.44, 100]]},                                  # CROISE
+            {"i": "t1", "ok": True, "recv": 1_030_000, "b": [[0.41, 100]],
+             "a": [[0.43, 100]]},
+            {"i": "t2", "ok": True, "recv": 1_000_000, "b": [[0.10, 100]],
+             "a": [[0.12, 100]]},
+        ]
+
+    def test_invalid_and_crossed_books_never_enter_the_series(self):
+        from prism_v2.poly_markout import BookSeries
+        s = BookSeries.from_records("t1", self._recs())
+        self.assertEqual(len(s), 2)          # 4 enregistrements, 2 exploitables
+        self.assertEqual(s.ts, [1_000, 1_030])
+
+    def test_series_is_isolated_per_token(self):
+        from prism_v2.poly_markout import BookSeries
+        self.assertEqual(len(BookSeries.from_records("t2", self._recs())), 1)
+
+    def test_reference_older_than_the_tolerance_is_refused(self):
+        from prism_v2.poly_markout import BookSeries, MAX_BOOK_AGE_S
+        s = BookSeries.from_records("t1", self._recs())
+        self.assertIsNotNone(s.at(1_030 + MAX_BOOK_AGE_S))
+        self.assertIsNone(s.at(1_030 + MAX_BOOK_AGE_S + 1))
+
+    def test_never_returns_a_future_book(self):
+        from prism_v2.poly_markout import BookSeries
+        s = BookSeries.from_records("t1", self._recs())
+        self.assertIsNone(s.at(999))
+        self.assertAlmostEqual(s.at(1_029)[0], 0.41, places=9)
+
+    def test_horizons_exceed_the_collection_step(self):
+        from prism_v2.poly_markout import HORIZONS_S
+        self.assertGreaterEqual(min(HORIZONS_S), 60)
