@@ -87,6 +87,20 @@ class TestCausalite(unittest.TestCase):
         self.assertGreater(r.ratio, 2.0)
         self.assertIn("symptome", r.verdict.detail)
 
+    def test_un_evenement_sans_pouvoir_predictif_est_attrape(self):
+        """Defaut trouve en UTILISANT ce controle : « rafale_de_trades »
+        sortait CANDIDAT avec un mouvement posterieur de -0,60 bps. Un ratio
+        favorable ne suffit pas — encore faut-il qu'il y ait quelque chose a
+        capturer dans le sens annonce.
+        """
+        r = check_causal_direction("rafale", [6.84] * 30, [-0.60] * 30)
+        self.assertEqual(r.verdict.status, ALERTE)
+        self.assertIn("n'annonce rien", r.verdict.detail)
+
+    def test_un_mouvement_posterieur_nul_est_attrape(self):
+        r = check_causal_direction("x", [0.1] * 30, [0.0] * 30)
+        self.assertEqual(r.verdict.status, ALERTE)
+
     def test_une_vraie_cause_passe(self):
         r = check_causal_direction("x", [0.5] * 40, [8.0] * 40)
         self.assertEqual(r.verdict.status, OK)
@@ -94,6 +108,13 @@ class TestCausalite(unittest.TestCase):
     def test_un_mouvement_anterieur_nul_passe(self):
         r = check_causal_direction("x", [0.0] * 40, [5.0] * 40)
         self.assertEqual(r.verdict.status, OK)
+
+    def test_le_seuil_de_posteriorite_est_reglable(self):
+        """Un mouvement posterieur reel mais inferieur aux couts ne merite
+        pas d'etre appele candidat."""
+        faible = check_causal_direction("x", [0.1] * 30, [2.0] * 30,
+                                        min_post_bps=11.0)
+        self.assertEqual(faible.verdict.status, ALERTE)
 
     def test_trop_peu_d_evenements_ne_conclut_pas(self):
         r = check_causal_direction("x", [10.0] * 5, [1.0] * 5)

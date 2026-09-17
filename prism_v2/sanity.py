@@ -153,7 +153,8 @@ class CausalReport:
 
 def check_causal_direction(name: str, pre_moves: Sequence[float],
                            post_moves: Sequence[float],
-                           symptom_ratio: float = 2.0) -> CausalReport:
+                           symptom_ratio: float = 2.0,
+                           min_post_bps: float = 0.0) -> CausalReport:
     """L'evenement PRECEDE-t-il le mouvement, ou le suit-il ?
 
     `pre_moves` : mouvement du prix AVANT l'evenement, oriente dans le sens
@@ -170,7 +171,20 @@ def check_causal_direction(name: str, pre_moves: Sequence[float],
     pre = statistics.fmean(pre_moves)
     post = statistics.fmean(post_moves)
     ratio = pre / post if abs(post) > 1e-12 else float("inf")
-    if pre > 0 and ratio >= symptom_ratio:
+
+    # Premiere condition, decouverte en UTILISANT ce controle : un evenement
+    # dont le mouvement posterieur est nul ou NEGATIF n'annonce rien. La
+    # version initiale ne testait que la domination de l'anteriorite, si bien
+    # qu'un evenement sans aucun pouvoir predictif — voire contraire a celui
+    # qu'il pretend — ressortait « OK » parce que son ratio etait negatif.
+    if post <= min_post_bps:
+        v = Verdict(
+            f"causalite:{name}", ALERTE,
+            f"le mouvement posterieur vaut {post:.2f} bps, au plus "
+            f"{min_post_bps:.2f} : l'evenement n'annonce rien dans le sens "
+            f"qu'il pretend. Un ratio favorable ne suffit pas, il faut "
+            f"quelque chose a capturer.", ratio)
+    elif pre > 0 and ratio >= symptom_ratio:
         v = Verdict(
             f"causalite:{name}", ALERTE,
             f"le prix bouge {ratio:.1f}x plus AVANT l'evenement qu'apres "
@@ -180,7 +194,7 @@ def check_causal_direction(name: str, pre_moves: Sequence[float],
     else:
         v = Verdict(f"causalite:{name}", OK,
                     f"avant {pre:.2f} bps, apres {post:.2f} bps — "
-                    f"l'evenement n'est pas domine par son anteriorite", ratio)
+                    f"l'evenement precede un mouvement reel", ratio)
     return CausalReport(len(pre_moves), pre, post, ratio, v)
 
 
