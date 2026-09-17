@@ -311,6 +311,49 @@ def run(books_path: Path = DEFAULT_BOOKS, markets_path: Path = DEFAULT_MARKETS,
             "mean_markout": statistics.mean(r[2] for r in v),
             **_stats([r[0] for r in v])} for k, v in buckets.items()}
 
+    # ── 5. LES DEUX TERMES DE REVENU NE SE COMPORTENT PAS PAREIL ──────────
+    print(); print("=" * 84)
+    print("5. REBATE vs RECOMPENSES DE LIQUIDITE — structures opposees")
+    print("=" * 84)
+    print("REBATE : proportionnel aux FILLS. rebateRate x rate x p(1-p) par part.")
+    print("  Il monte avec le volume execute, et n'est PAS dilue par les")
+    print("  concurrents : chacun touche sa part des frais que SES fills ont")
+    print("  generes. C'est le seul terme qui PASSE A L'ECHELLE.")
+    print()
+    print("RECOMPENSES : part d'un POOL QUOTIDIEN FIXE, ponderee par la taille")
+    print("  cotee dans la bande, divisee par le score de TOUS les makers.")
+    print("  Formule officielle S(v,s) = ((v-s)/v)^2, epoque de 10 080 echantillons")
+    print("  d'une minute. Elle est donc DILUEE par la concurrence et PLAFONNEE")
+    print("  en valeur absolue : elle ne passe PAS a l'echelle.")
+    print()
+    pools = [(m.rewards_daily_rate or 0.0, m.rewards_max_spread,
+              m.rewards_min_size, m.question)
+             for m in markets.values()]
+    total_pool = sum(p[0] for p in pools)
+    paying = [p for p in pools if p[0] > 0]
+    print(f"pool quotidien observable sur les {len(markets)} marches suivis : "
+          f"{total_pool:,.0f} $/jour")
+    print(f"  dont {len(paying)} marches versent effectivement quelque chose")
+    if paying:
+        for rate, spr, sz, q in sorted(paying, reverse=True)[:5]:
+            print(f"    {rate:>7,.0f} $/j  bande {spr}c  taille min {sz:.0f}  {q[:38]}")
+    print()
+    print(f"PLAFOND STRUCTUREL : meme en captant 100 % de ces pools — ce qu'aucun")
+    print(f"maker ne fait — le revenu de recompense est borne a "
+          f"{total_pool*365:,.0f} $/an sur ce panier.")
+    print("  Un operateur plus gros ne l'augmente pas : il se dilue lui-meme.")
+    print("  Pour un objectif de revenus IMPORTANTS, seul le rebate compte —")
+    print("  et le rebate est proportionnel aux fills, donc a l'adverse")
+    print("  selection qui les accompagne. La question se reduit au fill.")
+    report["reward_structure"] = {
+        "total_daily_pool_observed": total_pool,
+        "n_markets_paying": len(paying), "n_markets_tracked": len(markets),
+        "annual_ceiling_if_fully_captured": total_pool * 365,
+        "note": ("le rebate passe a l'echelle (proportionnel aux fills) ; la "
+                 "recompense non (pool fixe, dilue par la concurrence). La "
+                 "part reellement obtenue depend des concurrents, qui ne sont "
+                 "pas observables : elle reste UNKNOWN.")}
+
     report["finished_at"] = utc_now_iso()
     if json_out:
         Path(json_out).write_text(json.dumps(report, indent=1, ensure_ascii=False,
