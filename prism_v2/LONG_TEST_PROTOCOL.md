@@ -82,3 +82,29 @@ rendement et le risque dans la même proportion.
 
 Si aucun signal ne survit, je le dirai sans détour et ne proposerai pas un
 sixième.
+
+---
+
+## Amendement — S5 BLEND retiré, **avant réception des données**
+
+En implémentant les signaux j'ai constaté que **S5 est identiquement nul, par
+construction et non par les données** :
+
+```
+S2 = -S1   et   S4 = -S3      (exactement, par definition)
+z(-x) = -z(x)                 (le z-score est impair)
+=> z(S1)+z(S2)+z(S3)+z(S4) = 0   pour tout jeu de donnees
+```
+
+Vérifié numériquement sur un tirage aléatoire : `max |z(-x)+z(x)| = 0`.
+
+Mélanger un signal et sa négation exacte ne produit aucune information. Ce
+n'est pas un résultat empirique, c'est une identité algébrique — constatable
+sans regarder la moindre donnée, et je la constate avant que la collecte soit
+terminée.
+
+**S5 est retiré.** Il reste **quatre** hypothèses, et la correction
+Benjamini-Hochberg porte donc sur 4 tests, non 5.
+
+Aucun signal de remplacement n'est introduit : en ajouter un maintenant
+serait exactement le geste que ce protocole existe pour interdire.
