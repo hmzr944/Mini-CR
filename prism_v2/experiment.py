@@ -313,6 +313,18 @@ def run_config(spec: InstrumentSpec, series: SnapshotSeries, lo: int, hi: int,
 
 
 
+#: Ce que l'auteur du pipeline a DEJA VU de ces donnees avant le run final.
+#: Declare explicitement : un protocole qui ne sait pas ce qui a ete regarde
+#: ne protege rien.
+PRIOR_EXPOSURE = (
+    "le pipeline a ete mis au point en observant des resultats DISCOVERY sur "
+    "des extraits partiels de la meme session de collecte (0.16 h, 1 h, 2 h)",
+    "les grilles de seuils et l'ajout du pari CONTINUATION decoulent de ces "
+    "observations partielles",
+    "le FINAL_HOLDOUT n'a jamais ete ouvert : aucune configuration n'a "
+    "survecu a DEVELOPMENT lors de ces essais",
+)
+
 #: Hypotheses de frais testees, en bps PAR JAMBE. 0 est inclus pour la meme
 #: raison que la latence nulle : si le net reste negatif meme SANS FRAIS,
 #: alors obtenir des frais OBSERVED — le blocage principal du projet — ne
@@ -569,7 +581,30 @@ def run(obs_path: Path, latency_ms: int = DEFAULT_LATENCY_MS,
         lo, hi = proto.bounds(s)
         print(f"  {s.value:<15} {(hi-lo)/60000:7.1f} min"
               f"   {'(peut servir a choisir)' if s.may_inform_choices else '(ne choisit rien)'}")
+    # ── INTEGRITE DU PROTOCOLE : ce que l'auteur a deja vu ────────────────
+    # Le pipeline a ete developpe en observant des resultats DISCOVERY sur des
+    # extraits partiels de CETTE MEME session de collecte. Cela ne contamine
+    # pas le holdout — il n'a jamais ete ouvert, aucune configuration n'ayant
+    # survecu — mais cela retire au segment DISCOVERY son caractere
+    # confirmatoire. Le taire rendrait le rapport faux par omission.
+    for note in PRIOR_EXPOSURE:
+        proto.declare_modification(note)
+    integrity = {
+        "holdout_opened_before_this_run": False,
+        "prior_exposure": list(PRIOR_EXPOSURE),
+        "discovery_segment_is_exploratory": True,
+        "note": ("Le segment DISCOVERY a ete observe pendant la mise au point "
+                 "du pipeline : ses chiffres sont EXPLORATOIRES. Seuls "
+                 "VALIDATION et FINAL_HOLDOUT peuvent porter une conclusion "
+                 "confirmatoire, et le holdout n'est ouvert que si une "
+                 "configuration survit d'abord a VALIDATION."),
+    }
+    print("\nINTEGRITE DU PROTOCOLE")
+    for n in PRIOR_EXPOSURE:
+        print(f"  - {n}")
+    print(f"  -> le segment DISCOVERY est EXPLORATOIRE, pas confirmatoire")
     report["protocol"] = proto.to_dict()
+    report["protocol_integrity"] = integrity
 
     seriess = {i: SnapshotSeries.from_records(i, recs) for i in inst_ids}
     seriess = {i: s for i, s in seriess.items() if len(s) > 100 and i in specs_by_id}
