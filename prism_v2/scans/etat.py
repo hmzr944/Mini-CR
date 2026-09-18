@@ -152,6 +152,37 @@ PLAFONDS = [
     # plafonne a 13,6 bps/jour en captant TOUT son flux agressif.
     # Zero est le plancher des frais : aucune venue ne descend plus bas,
     # donc aucune reduction de cout ne peut ouvrir cette famille.
+    # POLITIQUE ADAPTATIVE CONDITIONNELLE. Tout ce qui precede mesurait des
+    # moyennes INCONDITIONNELLES. Le mandat interdit d'en conclure l'absence
+    # de structure conditionnelle. La boucle complete a donc ete construite
+    # — etat -> valeur d'action -> action -> execution -> PnL -> registre —
+    # et ajustee sur le panneau synchrone : 15 perpetuels, 300 ms, 6,5 h,
+    # flux signe, tailles au touch, spread, volatilite.
+    # Protocole : coupure temporelle 60/40, TOUT ajuste sur l'apprentissage
+    # (normalisations, bornes de quantiles, variables, horizon, cellules),
+    # test lu une seule fois. NO_TRADE disponible partout et valant zero.
+    # TAKER (remplissage certain) : la politique ne trade JAMAIS, ni en
+    # apprentissage ni en test. Aucune cellule d'etat n'atteint zero.
+    # ENTREE PASSIVE (borne sup., remplissage inconnu) : +2,85 bps par
+    # decision en apprentissage, -3,47 bps en test. Elle ne generalise pas.
+    # Le frais maker a ete balaye jusqu'a ZERO : la valeur d'apprentissage
+    # MONTE (2,85 -> 3,82) pendant que le test RESTE negatif (-2,27 au mieux).
+    # C'est la signature d'un ajustement au bruit, et la reponse a la
+    # question du goulot : ce n'est ni le cout ni le capital (pic de marge
+    # 918,70 USD sur 1 000 reserves, donc jouable), c'est le signal.
+    # Le moteur n'est pas aveugle : son temoin positif trouve et exploite
+    # hors echantillon un signal construit, et son temoin negatif refuse de
+    # fabriquer du gain a partir de bruit.
+    Ceiling("politique adaptative conditionnelle (taker, EXECUTABLE)", 0.0,
+            NO_MAGNITUDE, 21_240,
+            "policy_fit.py — aucune cellule d'etat ne vaut mieux que "
+            "NO_TRADE, ni en apprentissage ni en test",
+            denominator=CAPITAL),
+    Ceiling("politique adaptative, entree passive (BORNE SUP.)", -31_425.79,
+            NO_MAGNITUDE, 465,
+            "policy_costfloor.py — train +2,85 -> test -3,47 bps/trade ; "
+            "negatif jusqu'a un frais maker de zero ; 2,6 h de test",
+            denominator=CAPITAL),
     Ceiling("fourniture de liquidite a FRAIS NULS (plancher du cout)", 13.60,
             NO_MAGNITUDE, 97,
             "fee_floor_bh.py — 0/17 survivent a BH par blocs disjoints ; "
@@ -204,7 +235,18 @@ def build() -> Dashboard:
             "sur blocs disjoints, et l'unique instrument a vraie capacite "
             "perd 0,86 bps par remplissage a frais nuls avec t = -6,70 sur "
             "55 743 remplissages. Le cout n'etait donc pas le goulot non "
-            "plus : c'est la selection adverse, qui ne se negocie pas."),
+            "plus : c'est la selection adverse, qui ne se negocie pas. "
+            "ET CE N'EST PAS NON PLUS UNE LIMITE DE REPRESENTATION. La "
+            "boucle adaptative complete a ete construite et ajustee : etat "
+            "microstructurel (flux signe x liquidite x reponse du prix x "
+            "volatilite), valeur conditionnelle de chaque action, NO_TRADE "
+            "disponible partout, coupure temporelle stricte. En actions a "
+            "remplissage certain, la politique apprise ne trade JAMAIS : "
+            "aucune cellule d'etat n'atteint zero. En entree passive, elle "
+            "gagne +2,85 bps en apprentissage et perd -3,47 en test, et "
+            "reste negative jusqu'a un frais maker de ZERO. Le goulot n'est "
+            "donc ni le cout, ni le capital, ni l'absence de conditionnement "
+            "— c'est l'amplitude du signal conditionnel lui-meme."),
         next_action=(
             "AUCUNE que je puisse justifier economiquement. Je ne propose pas "
             "une cinquieme variante des formes fermees, et je n'ai pas "
