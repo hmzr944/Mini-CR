@@ -8,6 +8,7 @@ qui n'a pas ete mesure est INCONNU et s'affiche INCONNU.
 from prism_v2.dashboard import (DERIVED, MEASURED, OBSERVED, UNKNOWN,
                                 Dashboard, Metric, Objective)
 from prism_v2.kill_registry import (CAPITAL, COST_DOMINATES, PAIR,
+                                    NOTIONAL as _N,
                                     MEASUREMENT_INVALID, NOTIONAL,
                                     NOT_HEDGEABLE, NOT_PERSISTENT,
                                     NO_MAGNITUDE, Ceiling, KillRegistry)
@@ -40,6 +41,17 @@ PLAFONDS = [
     # l'economie BAISSE : l'allocation causale n'y capte que 0,26 a 0,82
     # bps/jour de flux contre 6,46, et 0/15 cellules sont positives. Le levier
     # n'etait pas le goulot.
+    # RESET DE REPRESENTATION : panier NON COUVERT, risque dilue
+    # transversalement, flux = NIVEAU du funding et non differentiel, 2
+    # traversees par nom au lieu de 4. Le funding capte (1,51 a 4,06 bps/jour)
+    # ne couvre le cout (11,5 bps par entree) a AUCUN horizon teste. Les
+    # cellules positives le sont par le terme de prix, qui oscille de -43 a
+    # +179 bps sur 15 entrees. 0/16 survivent a Benjamini-Hochberg.
+    Ceiling("panier non couvert, risque dilue (RESET, ECHEC)", -1.40,
+            COST_DOMINATES, 98,
+            "basket_reset.py — bruit de prix ~45 bps/jour contre 1,5 de "
+            "funding, rapport 1:30 ; l'univers accessible est un seul facteur",
+            denominator=_N, aggregation=PAIR),
     # Mesure PAR PAIRE (alpha propre, flux causal propre) : alpha varie de
     # 0,160 a 0,727 selon la paire — le pooling cachait bien de la structure,
     # mais AUCUNE paire ne combine gros flux et alpha bas. Meilleure : 19,6.
