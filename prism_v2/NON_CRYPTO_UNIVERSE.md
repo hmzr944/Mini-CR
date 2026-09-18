@@ -159,10 +159,58 @@ SKHY/SKHYNIX — les deux noms qui semblaient être le même sous-jacent — lai
 **50 %/an** de résidu. La loi établie par l'audit tient dans cet univers :
 *ce que rien n'arbitre n'est pas non plus couvrable.*
 
-**Inter-venues OKX / Hyperliquid-xyz.** Voir `nc_xvenue.py` : l'écart
-**exécutable** (bid riche moins ask pauvre, jamais un prix milieu), après
-conversion du peg, contre un aller-retour de **19 bps en taker** — quatre
-exécutions — ou 7 bps en maker.
+**Inter-venues OKX / Hyperliquid-xyz.** C'est une forme économique
+**différente** de tout ce qui précède : la position est *couverte* — longue une
+venue, courte l'autre, même sous-jacent — donc sans risque de prix. Ce qui est
+encaissé est la variation de l'écart. Un aller-retour y compte **quatre**
+exécutions : 19,0 bps en taker, 7,0 bps en borne maker.
+
+*Carnets simultanés* (504 relevés, 18 paires, balayage médian 6,9 s, peg
+converti) — écart **exécutable**, bid riche moins ask pauvre, jamais un prix
+milieu :
+
+| | écart médian | p99 | max | > 19 bps | > 7 bps |
+|---|---|---|---|---|---|
+| toutes observations | **1,28 bps** | 7,15 | 8,55 | **0,00 %** | 1,59 % |
+
+*Historique* — 18 instruments, 17 jours, bougies 5 min des deux venues. Le
+premier passage a rendu un brut de **20 bps** à 4 σ avec **t = 48** et cinq
+cellules survivantes. **Ce chiffre était faux, et sa réfutation est le résultat
+le plus utile de cette section.** Trois défauts le produisaient : seuil estimé
+sur l'échantillon complet (la dispersion de demain décidait du seuil
+d'aujourd'hui) ; entrée à la clôture de la barre du signal ; et surtout
+**sélection sur le bruit d'observation** — une clôture de bougie est le
+*dernier échange* de la barre, pas une cotation, et sur deux venues les deux
+derniers échanges peuvent être distants de plusieurs minutes. Choisir les
+barres où l'écart est le plus grand revient à choisir celles où ce décalage
+est le plus grand, et la barre suivante « revient » d'exactement ce décalage.
+
+Seuils rendus causaux et entrée repoussée d'une barre :
+
+| seuil | tenue | décalage | n | /jour | brut | t | net taker |
+|---|---|---|---|---|---|---|---|
+| 2 σ | 12 | 0 | 1 675 | 96 | **+0,92** | 7,11 | −18,08 |
+| 2 σ | 3 | 1 | 2 470 | 141 | +0,23 | 2,42 | −18,77 |
+| 3 σ | 3 | 1 | 578 | 33 | +0,28 | 1,17 | −18,72 |
+| 4 σ | 12 | 1 | 125 | 7 | +0,65 | 0,97 | −18,35 |
+
+**0 / 27 cellules à net positif.** L'écart inter-venues *se referme
+réellement* — t = 7,1 sur 1 675 observations — mais il vaut **0,9 bps** contre
+19. C'est le rapport du projet dans sa forme la plus extrême : **1 pour 21.**
+
+## 4 bis. Le compte des formes fermées dans cet univers
+
+| forme | nature | ce qui a été mesuré | contre |
+|---|---|---|---|
+| perp / index composite | traversée | 0 à 6 bps, → 0 à 1 min | 11,4 bps |
+| structure de séance | détention | dérive de l'échantillon | témoin apparié |
+| couverture par paire | couverte | résidu ≥ 32 % de la vol | 630 paires |
+| inter-venues OKX/HL | **couverte** | **0,9 bps**, t = 7,1 | **19 bps** |
+
+Les quatre sont fermées par mesure, pas par opinion. La dernière est la plus
+instructive parce qu'elle est *sans risque de prix* : c'est la forme que le
+mandat cherche, et elle existe — elle vaut simplement un vingt-et-unième de
+son coût.
 
 ## 5. Ce que cet univers ajoute à la conclusion du projet
 

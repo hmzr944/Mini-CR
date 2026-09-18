@@ -124,3 +124,37 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+# ----------------------------------------------- mesure HISTORIQUE de l'ecart
+
+def load_hist(raw_dir: str, bar: str = "5m"):
+    """Rend (okx, hl, peg) alignes sur les memes horodatages."""
+    from prism_v2.scans.nc_basis import load_raw
+    perp, _index, peg = load_raw(raw_dir, bar)
+    hl: Dict[str, Dict[int, list]] = {}
+    for fn in sorted(os.listdir(raw_dir)):
+        if fn.startswith("H_") and fn.endswith(f"_{bar}.json"):
+            sym = fn[2:-len(f"_{bar}.json")]
+            with open(os.path.join(raw_dir, fn)) as f:
+                hl[sym] = {int(k): v for k, v in json.load(f).items()}
+    return perp, hl, peg
+
+
+def gap_series(okx_rows: Dict[int, list], hl_rows: Dict[int, list],
+               peg: Dict[int, float]) -> Dict[int, float]:
+    """Ecart OKX/Hyperliquid en bps, corrige du peg USDT/USD.
+
+    OKX marge en USDT, Hyperliquid en USDC. Sans la conversion, tout l'univers
+    parait cher de ~2 bps sur OKX — du meme ordre que l'ecart cherche.
+    """
+    out: Dict[int, float] = {}
+    for t in sorted(set(okx_rows) & set(hl_rows) & set(peg)):
+        po, ph, u = okx_rows[t][3], hl_rows[t][3], peg[t]
+        if po <= 0 or ph <= 0 or u <= 0:
+            continue
+        if okx_rows[t][4] <= 0 or hl_rows[t][4] <= 0:
+            continue            # une barre sans echange ne porte pas de prix
+        import math as _m
+        out[t] = 1e4 * _m.log(po * u / ph)
+    return out
