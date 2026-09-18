@@ -153,3 +153,33 @@ class TestDenominateur(unittest.TestCase):
         r = K.from_list([C("f", 9.0, COST_DOMINATES, 10, "m", denominator=NOTIONAL)])
         txt = r.render(SEUIL)
         self.assertIn("NOTIONNEL", txt)
+
+
+class TestAgregation(unittest.TestCase):
+    """Un rendement PAR PAIRE et un rendement en PORTEFEUILLE ne sont pas
+    comparables : la mutualisation du coussin les separe d'un facteur mesure
+    (2,21 sur 16 paires). Lire 19,6 par paire comme une degradation de 33,3 en
+    portefeuille est la faute que ce verrou empeche."""
+
+    def test_agregation_inconnue_refusee(self):
+        from prism_v2.kill_registry import Ceiling as C
+        with self.assertRaises(ValueError):
+            C("x", 1.0, COST_DOMINATES, 10, "m", aggregation="SECTEUR")
+
+    def test_comparer_paire_et_portefeuille_est_refuse(self):
+        from prism_v2.kill_registry import CAPITAL, PAIR, PORTFOLIO, Ceiling as C
+        c = C("x", 33.3, COST_DOMINATES, 10, "m", aggregation=PORTFOLIO)
+        self.assertTrue(c.kills(20.0, CAPITAL, PORTFOLIO))
+        with self.assertRaises(ValueError):
+            c.kills(19.6, CAPITAL, PAIR)
+
+    def test_defaut_est_portefeuille(self):
+        from prism_v2.kill_registry import PORTFOLIO, Ceiling as C
+        self.assertEqual(C("x", 1.0, COST_DOMINATES, 10, "m").aggregation,
+                         PORTFOLIO)
+
+    def test_le_rendu_affiche_l_agregation(self):
+        from prism_v2.kill_registry import PAIR, Ceiling as C, KillRegistry as K
+        txt = K.from_list([C("f", 19.6, COST_DOMINATES, 17, "m",
+                             aggregation=PAIR)]).render(SEUIL)
+        self.assertIn("PAIRE", txt)

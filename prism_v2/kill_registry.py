@@ -36,6 +36,15 @@ CAPITAL = "CAPITAL"
 NOTIONAL = "NOTIONNEL"
 _DENOMINATORS = (CAPITAL, NOTIONAL)
 
+#: Niveau d'agregation d'un plafond. Un rendement mesure sur UNE paire et un
+#: rendement mesure sur un PORTEFEUILLE de paires ne sont pas comparables : le
+#: second beneficie de la mutualisation du coussin (facteur 2,21 mesure sur 16
+#: paires). Lire 19,6 par paire comme une degradation de 33,3 en portefeuille
+#: est une faute d'unite, au meme titre que melanger capital et notionnel.
+PAIR = "PAIRE"
+PORTFOLIO = "PORTEFEUILLE"
+_AGGREGATIONS = (PAIR, PORTFOLIO)
+
 
 @dataclass(frozen=True)
 class Ceiling:
@@ -47,9 +56,13 @@ class Ceiling:
     n_observations: int
     method: str
     denominator: str = CAPITAL
+    aggregation: str = PORTFOLIO
     note: str = ""
 
     def __post_init__(self) -> None:
+        if self.aggregation not in _AGGREGATIONS:
+            raise ValueError(f"{self.family}: agregation inconnue "
+                             f"{self.aggregation!r}")
         if self.denominator not in _DENOMINATORS:
             raise ValueError(f"{self.family}: denominateur inconnu "
                              f"{self.denominator!r} — un rendement sans "
@@ -62,7 +75,8 @@ class Ceiling:
                              f"pas verifiable")
 
     def kills(self, candidate_bps_per_day: float,
-              denominator: str = CAPITAL) -> bool:
+              denominator: str = CAPITAL,
+              aggregation: str = PORTFOLIO) -> bool:
         """Ce plafond condamne-t-il un candidat de la meme famille ?
 
         Refuse de comparer deux rendements de denominateurs differents : le
@@ -73,6 +87,11 @@ class Ceiling:
                 f"{self.family}: comparaison entre un rendement sur "
                 f"{denominator} et un plafond sur {self.denominator}. "
                 f"Convertis d'abord par le levier.")
+        if aggregation != self.aggregation:
+            raise ValueError(
+                f"{self.family}: comparaison entre une mesure {aggregation} et "
+                f"un plafond {self.aggregation}. La mutualisation du coussin "
+                f"separe les deux d'un facteur mesure, pas de 1.")
         return candidate_bps_per_day <= self.ceiling_bps_per_day
 
 
@@ -148,20 +167,21 @@ class KillRegistry:
         c = Ceiling(family=family, ceiling_bps_per_day=new_bps_per_day,
                     reason="REVISE", n_observations=n_observations,
                     method=evidence,
-                    denominator=old.denominator if old else CAPITAL)
+                    denominator=old.denominator if old else CAPITAL,
+                    aggregation=old.aggregation if old else PORTFOLIO)
         self.ceilings[family] = c
         return c
 
     def render(self, threshold_bps_per_day: float) -> str:
         lines = [f"{'famille':<42}{'plafond bps/j':>15}{'sur':>10}"
-                 f"{'x objectif':>12}{'n':>9}   motif",
-                 "-" * 104]
+                 f"{'agregation':>14}{'x objectif':>12}{'n':>9}   motif",
+                 "-" * 118]
         for c in sorted(self.ceilings.values(),
                         key=lambda x: -x.ceiling_bps_per_day):
             ratio = (f"{c.ceiling_bps_per_day/threshold_bps_per_day:>12.4f}"
                      if c.denominator == CAPITAL else f"{'—':>12}")
             lines.append(f"{c.family:<42}{c.ceiling_bps_per_day:>15.2f}"
-                         f"{c.denominator:>10}{ratio}"
+                         f"{c.denominator:>10}{c.aggregation:>14}{ratio}"
                          f"{c.n_observations:>9,}   {c.reason}")
         b = self.best_known()
         if b:

@@ -7,7 +7,7 @@ qui n'a pas ete mesure est INCONNU et s'affiche INCONNU.
 """
 from prism_v2.dashboard import (DERIVED, MEASURED, OBSERVED, UNKNOWN,
                                 Dashboard, Metric, Objective)
-from prism_v2.kill_registry import (CAPITAL, COST_DOMINATES,
+from prism_v2.kill_registry import (CAPITAL, COST_DOMINATES, PAIR,
                                     MEASUREMENT_INVALID, NOTIONAL,
                                     NOT_HEDGEABLE, NOT_PERSISTENT,
                                     NO_MAGNITUDE, Ceiling, KillRegistry)
@@ -40,6 +40,12 @@ PLAFONDS = [
     # l'economie BAISSE : l'allocation causale n'y capte que 0,26 a 0,82
     # bps/jour de flux contre 6,46, et 0/15 cellules sont positives. Le levier
     # n'etait pas le goulot.
+    # Mesure PAR PAIRE (alpha propre, flux causal propre) : alpha varie de
+    # 0,160 a 0,727 selon la paire — le pooling cachait bien de la structure,
+    # mais AUCUNE paire ne combine gros flux et alpha bas. Meilleure : 19,6.
+    Ceiling("meilleure paire isolee (SKHYNIX/MU)", 19.60, COST_DOMINATES, 17,
+            "per_pair.py — 4/28 paires positives, 0/28 survivent a BH",
+            denominator=CAPITAL, aggregation=PAIR),
     Ceiling("carry meme sous-jacent (levier 24x, ABANDONNE)", -137.2,
             NOT_PERSISTENT, 21,
             "carry_alloc.py — 0/15 cellules positives ; alpha_peg.py pour le "
