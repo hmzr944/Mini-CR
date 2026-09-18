@@ -450,6 +450,69 @@ touch, elle vaut 0,26 bps.
 
 ---
 
+## 5 quinquies. L'univers, mesuré au lieu d'être hérité
+
+Toutes les mesures de ce document portent sur 21 instruments d'une seule
+venue. Ce choix n'a jamais été justifié : il a été **hérité** de ce que PRISM
+collectait. La directive finale exige que l'économie justifie l'univers.
+
+**Paramètre structurel mesuré** : le *budget* d'un instrument = mouvement
+quotidien (Parkinson sur haut/bas 24 h) rapporté au coût d'un aller-retour
+(2 × frais taker publics + demi-spread observé). Il dit combien de fois par
+jour le prix parcourt la distance qu'il faut payer pour agir. C'est une
+condition **nécessaire, jamais suffisante**.
+
+**3 419 instruments**, quatre venues joignables (OKX, MEXC, Bitget,
+Hyperliquid), volume 24 h ≥ 50 000 USD.
+
+| venue | n | budget médian | vs OKX |
+|---|---|---|---|
+| **OKX** | 1 002 | **21,3** | 1,00× |
+| Bitget | 640 | 16,9 | 0,79× |
+| MEXC | 1 604 | 14,5 | 0,68× |
+| Hyperliquid | 173 | 11,1 | 0,52× |
+
+**Changer de venue ne sert à rien** : OKX est déjà la meilleure. Mais la
+dispersion est **à l'intérieur** : médiane 17,3, p90 52,5, p99 123,7, max 474.
+
+**Et voici le biais, qui est le mien :**
+
+| instrument étudié par PRISM | rang | centile | budget |
+|---|---|---|---|
+| SOXL-USDT-SWAP | 342/3419 | 90,0 | 52,5 |
+| SOL-USDT-SWAP | 678 | 80,2 | 35,9 |
+| ETH-USDT-SWAP | 1806 | 47,2 | 16,1 |
+| **BTC-USDT-SWAP** | **2085** | **39,0** | **13,4** |
+
+PRISM a passé son existence dans le quintile le plus pauvre de l'univers
+accessible. Et le décile supérieur n'est pas de la camelote illiquide : son
+demi-spread médian (2,10 bps) est **plus serré** que la médiane globale
+(6,58), avec une volatilité 2,2× plus grande. ARB-USDT-SWAP : demi-spread
+0,24 bps, σ 2 126 bps/jour, 296 M$/jour, **budget 15× celui de BTC**.
+
+**Et cela ne change rien.** Un budget élevé dit qu'il y a de la place, pas que
+le mouvement soit exploitable. Mesure de l'exposant α du déplacement avec
+l'horizon — aucune règle, aucune position, aucun signal, seulement une
+propriété du processus :
+
+| population | budget | **α médian** | part α < 0,45 |
+|---|---|---|---|
+| haut budget (28 instruments) | 106 – 361 | **0,545** | 4 % |
+| témoin (déjà étudiés) | 13 – 73 | **0,544** | 0 % |
+| marche aléatoire | — | 0,500 | — |
+
+**Un facteur 15 sur le budget correspond à 0,001 d'écart sur α.** L'échelle du
+mouvement change ; sa structure non. Le rapport prévisible/imprévisible est
+identique aux deux extrémités de l'univers accessible. Et α > 0,5 signifie
+légèrement tendanciel, pas moyenne-réversif.
+
+**Portée exacte de ce résultat** : il démontre qu'aucune capture fondée sur le
+choix d'un horizon de détention ne peut moissonner ce budget, à aucune échelle
+de l'univers accessible. Il ne démontre pas l'absence de structure
+conditionnelle — α est une mesure inconditionnelle.
+
+---
+
 ## 6. Réponse à la mission
 
 **Dans l'univers accessible à PRISM, aucune structure mesurable n'atteint

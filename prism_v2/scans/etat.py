@@ -41,6 +41,21 @@ PLAFONDS = [
     # l'economie BAISSE : l'allocation causale n'y capte que 0,26 a 0,82
     # bps/jour de flux contre 6,46, et 0/15 cellules sont positives. Le levier
     # n'etait pas le goulot.
+    # UNIVERS. Le budget economique d'un instrument — mouvement quotidien
+    # rapporte au cout d'un aller-retour — a ete mesure sur 3 419 instruments
+    # de quatre venues joignables. PRISM n'avait jamais regarde que 21
+    # instruments, tous du quintile le PLUS PAUVRE : BTC-USDT-SWAP est au rang
+    # 2085/3419 (39e centile, budget 13,4) quand le haut de la distribution
+    # atteint 474. Le biais de selection etait le mien.
+    # ET CELA NE CHANGE RIEN : l'exposant de croissance du deplacement vaut
+    # 0,545 sur le haut budget contre 0,544 sur le temoin. Un facteur 15 sur
+    # le budget donne 0,001 d'ecart sur alpha. L'echelle change, la structure
+    # non ; le rapport previsible/imprevisible est identique.
+    Ceiling("haut budget (15x BTC) — structure identique", 0.0,
+            NO_MAGNITUDE, 3_419,
+            "univers_budget.py + budget_alpha.py — alpha 0,545 contre 0,544 "
+            "sur le temoin, marche aleatoire = 0,500",
+            denominator=_N, aggregation=PAIR),
     # FORME « CONTRAINTE » (directive finale, section 7) : quelqu'un DOIT agir
     # et paie une concession pour le droit d'agir maintenant ; le cote passif
     # la recoit. Mesure sur 29 038 rafales agressives reconstruites, carnet
@@ -125,7 +140,13 @@ def build() -> Dashboard:
         best_economy_bps_per_day=best.ceiling_bps_per_day,
         best_economy_label=best.family,
         bottleneck=(
-            "LA NATURE DE L'ACCES, pas les donnees. Quatre FORMES de gain de "
+            "DEMONTRE, ET NON PLUS AFFIRME. Le choix d'univers a ete mesure "
+            "et non herite : budget economique de 3 419 instruments sur quatre "
+            "venues. PRISM n'avait jamais quitte le quintile le plus pauvre "
+            "(BTC au 39e centile) et le haut de la distribution offre 15 fois "
+            "plus de place — mais l'exposant du mouvement y vaut 0,545 contre "
+            "0,544 sur le temoin. L'echelle change, la structure non. "
+            "Anciennement : la nature de l'acces, pas les donnees. Quatre FORMES de gain de "
             "marche ont ete bornees par des mesures independantes : la capture "
             "par TRAVERSEE (edge 1-6 bps contre 8-31 de cout, huit mesures), "
             "par FLUX detenu (33,3 bps/jour, cinq representations), par le "
