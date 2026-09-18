@@ -41,6 +41,27 @@ PLAFONDS = [
     # l'economie BAISSE : l'allocation causale n'y capte que 0,26 a 0,82
     # bps/jour de flux contre 6,46, et 0/15 cellules sont positives. Le levier
     # n'etait pas le goulot.
+    # STRUCTURE CONDITIONNELLE. alpha = 0,545 etait INCONDITIONNEL : il
+    # etablissait l'absence de structure MOYENNE, pas l'absence de structure
+    # conditionnelle. Quatre tests successifs ont produit quatre chiffres
+    # spectaculaires, tous artefactuels :
+    #   alpha | etat  : ecart 0,206 monotone -> retour de VOLATILITE, pas de
+    #                   direction ;
+    #   VR    | etat  : 3,49 -> 0,56, +669 bps/A-R -> denominateur instantane
+    #                   contre numerateur sur q periodes, meme confond ;
+    #   M(q)  | etat  : 1,661, +458 bps net -> fenetres chevauchantes, moment
+    #                   d'ordre 4, aucune barre d'erreur ;
+    #   M(2) > 1 partout, rho = 0,13 -> PRIX PERIMES : USDC-USDT a 38,7 %
+    #                   d'heures a rendement exactement nul. Apres filtre,
+    #                   rho = -0,0103.
+    # Test economique direct, causal, 23 instruments apres filtre : 0/25
+    # cellules survivent a Benjamini-Hochberg ; a 1 h (n=5 300/cellule) le net
+    # vaut -13 a -15 bps avec t de -4,7 a -13,6.
+    Ceiling("structure conditionnelle a l'etat de volatilite", -13.0,
+            NO_MAGNITUDE, 26_512,
+            "cond_final_eco.py — rho = -0,010 apres filtre des prix perimes ; "
+            "0/25 survivants BH",
+            denominator=_N, aggregation=PAIR),
     # UNIVERS. Le budget economique d'un instrument — mouvement quotidien
     # rapporte au cout d'un aller-retour — a ete mesure sur 3 419 instruments
     # de quatre venues joignables. PRISM n'avait jamais regarde que 21

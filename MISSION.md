@@ -513,6 +513,49 @@ conditionnelle — α est une mesure inconditionnelle.
 
 ---
 
+## 5 sexies. Structure conditionnelle : quatre artefacts d'affilée
+
+α = 0,545 était **inconditionnel**. Il établit l'absence de structure
+temporelle *moyenne* — il ne dit rien d'un état rare où le mouvement serait
+prévisible. Cette section teste la conditionnalité, et elle est surtout le
+compte rendu de **quatre chiffres spectaculaires qui étaient tous faux**.
+
+| test | chiffre obtenu | artefact |
+|---|---|---|
+| α \| état | écart **0,206**, monotone | retour de volatilité : en vol basse elle remonte (α > 0,5), en vol haute elle redescend. Amplitude, pas direction. |
+| VR \| état | **3,49 → 0,56**, « +669 bps/A-R » | dénominateur `Var(r_t \| état)` instantané contre numérateur sur q périodes : le retour de volatilité désaligne les deux. Confond reconstruit en croyant le corriger. |
+| M(q) \| état | **1,661**, « +458 bps net » | fenêtres chevauchantes (n réel ÷32), moment d'ordre 4 sur queues épaisses, **aucune barre d'erreur** |
+| M(2) > 1 partout, ρ ≈ 0,13 | 6/25 cellules significatives | **prix périmés** : USDC-USDT a 38,7 % d'heures à rendement *exactement* nul |
+
+**Aucun n'a été arrêté par la statistique** : erreurs-types minuscules,
+monotonies propres, 275 933 observations. Les quatre ont été arrêtés par une
+seule question — *quelle propriété mon expérience mesure-t-elle réellement, et
+est-ce celle que je m'apprête à conclure ?*
+
+**Après filtre des prix périmés : ρ = −0,0103** (médiane sur 23 instruments),
+−0,0035 en moyenne. Négatif et quasi nul. L'autocorrélation de +0,13 était
+entièrement des paires de stablecoins qui ne bougent pas.
+
+**Test économique direct**, strictement causal, 23 instruments, 5 horizons ×
+5 états :
+
+| horizon | n/cellule | brut | **NET** | t |
+|---|---|---|---|---|
+| 1 h | 5 300 | −0,89 à −3,20 | **−13 à −15** | −4,7 à −13,6 |
+| 2 h | 2 800 | −3,78 à +1,57 | −10,6 à −15,9 | −2,0 à −5,3 |
+| 16 h | 433–620 | +7 à +74 | +8 à +62 | 0,42 à 1,63 |
+
+**6/25 cellules positives, 0/25 survivent à Benjamini-Hochberg.** Là où
+l'échantillon est grand, tout est fortement négatif. Les positives ont n = 433
+à 946.
+
+**Portée exacte** : ce test ferme la conditionnalité *à l'état de volatilité
+glissante*, sur *ces 23 instruments*, aux horizons *1 à 16 heures*. Il ne
+ferme ni les autres conditionnements, ni les horizons infra-horaires, ni la
+conditionnalité en général.
+
+---
+
 ## 6. Réponse à la mission
 
 **Dans l'univers accessible à PRISM, aucune structure mesurable n'atteint
