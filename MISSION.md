@@ -400,6 +400,56 @@ or il croît en √T à 0,012 près.
 
 ---
 
+## 5 quater. La forme « contrainte » : l'urgence ne paie pas
+
+Les cinq formes fermées partageaient une structure : *une valeur est **publiée**
+comme un taux, on immobilise du capital, on attend.* La directive finale pointe
+une structure différente : **quelqu'un doit agir et paie une concession pour le
+droit d'agir maintenant.**
+
+L'observable de cette contrainte n'est pas un motif de prix — c'est la
+**profondeur consommée**. Un ordre qui traverse plusieurs niveaux révèle un
+agresseur insensible au prix. La concession qu'il paie est reçue par le côté
+passif : c'est la question *qui reçoit la valeur aujourd'hui ?*
+
+Ce n'est pas l'étude maker refaite. Celle-ci mesurait les remplissages **au
+touch**, moyennés (−3,34 bps). Elle n'a jamais regardé les niveaux 2..N. Le
+touch est où l'**information** frappe ; la profondeur est où l'**urgence**
+frappe.
+
+**Mesure** : 29 038 rafales agressives reconstruites, carnet incrémentiel
+400 niveaux, 19 instruments, 287 118 messages.
+
+| seau (impressions) | n | USD médian | concession | adv 1 s | **passif net** | t |
+|---|---|---|---|---|---|---|
+| 1 | 21 369 | 115 | **0,00** | 0,88 | −2,50 | −25,00 |
+| 2–3 | 3 463 | 507 | **0,17** | 1,85 | −2,83 | −12,17 |
+| 4–10 | 2 947 | 816 | **0,15** | 1,54 | −2,85 | −13,27 |
+| >10 | 1 239 | 1 515 | **0,26** | 1,54 | −2,41 | −7,56 |
+
+**0/16 positif, 0/16 survivent à Benjamini-Hochberg.**
+
+**Le biais a été levé, et il allait dans l'autre sens que la crainte.** Ma
+première lecture prenait le touch dans le carnet reconstruit, et le diagnostic
+intégré a tiré : la concession ne croissait pas avec la profondeur, signe que
+le carnet lu était post-trade. Recalculée depuis les **impressions seules** —
+un acheteur remonte le carnet, donc sa première impression est la moins chère,
+et cette lecture ne dépend d'aucun ordonnancement entre canaux — la concession
+est **encore plus petite** : 0,26 bps au lieu de 0,65.
+
+**Ce que cela établit.** La concession d'urgence existe, et elle est dérisoire :
+l'écart de prix à l'intérieur d'une rafale de plus de dix impressions vaut
+**0,53 bps**. Les carnets sont trop denses au touch pour qu'il y ait quoi que
+ce soit à collecter. Contre 1,54 bps de sélection adverse, le côté passif rend
+six fois ce qu'il reçoit.
+
+**Sur ce marché, à cette taille, l'urgence ne se paie pas.** La valeur que la
+théorie des contraintes prédit — un participant contraint qui concède — n'est
+pas présente ici. Elle existe là où les carnets sont clairsemés ; sur OKX au
+touch, elle vaut 0,26 bps.
+
+---
+
 ## 6. Réponse à la mission
 
 **Dans l'univers accessible à PRISM, aucune structure mesurable n'atteint

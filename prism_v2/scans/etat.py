@@ -41,6 +41,22 @@ PLAFONDS = [
     # l'economie BAISSE : l'allocation causale n'y capte que 0,26 a 0,82
     # bps/jour de flux contre 6,46, et 0/15 cellules sont positives. Le levier
     # n'etait pas le goulot.
+    # FORME « CONTRAINTE » (directive finale, section 7) : quelqu'un DOIT agir
+    # et paie une concession pour le droit d'agir maintenant ; le cote passif
+    # la recoit. Mesure sur 29 038 rafales agressives reconstruites, carnet
+    # incrementiel 400 niveaux, 19 instruments.
+    # La concession existe et elle est DERISOIRE : 0,00 a 0,26 bps lue depuis
+    # les impressions seules (donc sans biais d'ordonnancement entre canaux).
+    # L'ecart de prix a l'interieur d'une rafale de plus de dix impressions
+    # vaut 0,53 bps : les carnets sont trop denses au touch pour qu'il y ait
+    # quoi que ce soit a collecter. Face a cela, selection adverse 1,54-1,88.
+    # 0/16 cellules positives, 0/16 survivent a Benjamini-Hochberg,
+    # t de -7,56 a -25,00.
+    Ceiling("concession d'urgence au cote passif (ECHEC)", -2.41,
+            COST_DOMINATES, 29_038,
+            "concession_verdict.py — concession 0,26 bps contre 1,54 de "
+            "selection adverse ; l'urgence ne paie pas sur ces carnets",
+            denominator=_N, aggregation=PAIR),
     # RESET DE REPRESENTATION : panier NON COUVERT, risque dilue
     # transversalement, flux = NIVEAU du funding et non differentiel, 2
     # traversees par nom au lieu de 4. Le funding capte (1,51 a 4,06 bps/jour)
