@@ -125,32 +125,28 @@ def build() -> Dashboard:
         best_economy_bps_per_day=best.ceiling_bps_per_day,
         best_economy_label=best.family,
         bottleneck=(
-            "LE MECANISME LUI-MEME. Son plafond est desormais MESURE et non "
-            "extrapole : 33,3 bps/jour de capital (3,33 EUR/jour), atteint a "
-            "14 jours de detention. Il est le produit de deux bornes mesurees "
-            "dont aucune ne bouge — un flux capte de 6,46 bps/jour de "
-            "notionnel, epingle par l'arbitrage, et un levier de 6,8x, fixe "
-            "par alpha = 0,493 : le residu de couverture est une marche "
-            "aleatoire, donc le coussin ne cesse jamais de croitre et le "
-            "levier s'effondre exactement la ou le cout finit de s'amortir. "
-            "Un fill maker parfait ne porterait le plafond qu'a 42,6 bps/jour. "
-            "Le levier a ete teste comme goulot et rejete : une couverture "
-            "meme-sous-jacent donne alpha = 0,236 et un levier de 24,2x, et "
-            "l'economie y BAISSE, parce que le flux capte y vaut 0,7 bps/jour "
-            "contre 6,46. Le goulot est la PERSISTANCE du differentiel, "
-            "mesuree negative trois fois (KAITO, non-crypto, carry)."),
+            "LA NATURE DE L'ACCES, pas les donnees. Quatre FORMES de gain de "
+            "marche ont ete bornees par des mesures independantes : la capture "
+            "par TRAVERSEE (edge 1-6 bps contre 8-31 de cout, huit mesures), "
+            "par FLUX detenu (33,3 bps/jour, cinq representations), par le "
+            "RISQUE (derive de 86 %/an requise) et par l'IMMEDIATETE "
+            "(concession 0,26 bps contre 1,54 de selection adverse, 29 038 "
+            "rafales). Toutes les grandeurs mesurees tombent entre 0,26 et "
+            "6,5 bps quand tout aller-retour en coute 8 a 31 : un rapport "
+            "constant de 1 pour 5 a 1 pour 20. Ce n'est pas un defaut de "
+            "mesure, c'est l'aspect d'une venue dense et concurrentielle vue "
+            "de l'exterieur avec des donnees publiques."),
         next_action=(
-            "AUCUNE sur ce mecanisme : abandonne selon le critere declare "
-            "AVANT la mesure (alpha >= 0,45 ; mesure 0,493). Le goulot n'est "
-            "plus une variable interne, c'est la forme economique elle-meme."),
+            "AUCUNE que je puisse justifier economiquement. Je ne propose pas "
+            "une cinquieme variante des formes fermees, et je n'ai pas "
+            "d'observable qui rende une cinquieme FORME mesurable."),
         next_action_why=(
-            "Les trois formes que peut prendre un gain de marche sont "
-            "desormais bornees par des mesures independantes : capture par "
-            "TRAVERSEE (edge 1-6 bps contre 8-31 de cout, huit mesures), "
-            "capture par FLUX (33,3 bps/jour, mesure de bout en bout), "
-            "capture par le RISQUE (derive de 86 %/an requise). La seule "
-            "positive manque d'un facteur 8,2. Aucune quatrieme famille ne "
-            "sera creee au motif qu'une variable reste inconnue."),
+            "Ce n'est pas une limite de DONNEES : plus d'historique de funding "
+            "validerait le 33,3 sans l'elever, et la concession de 0,26 bps "
+            "est une propriete structurelle de la densite des carnets, mesuree "
+            "sur 29 038 rafales. Les sources d'economie qui restent exigent ce "
+            "que ce compte n'a pas — latence, information, ou une position du "
+            "cote de la venue — et non davantage de donnees."),
     )
     d.add(Metric("capital disponible", 1_000.0, "EUR", OBSERVED,
                  "mandat"))
