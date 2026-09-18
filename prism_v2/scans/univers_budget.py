@@ -38,8 +38,18 @@ def get(u, body=None, timeout=25):
 
 #: Frais TAKER publics, niveau de base, sans reduction. Source : baremes
 #: publics des venues. Marques ESTIME : je ne peux pas les mesurer sans compte.
-FEES = {"OKX": 5.0, "Gate": 5.0, "MEXC": 2.0, "Bitget": 6.0,
+#:
+#: CORRECTION 2026-09-18. MEXC etait ici a 2.0 bps. C'etait FAUX. Le bareme
+#: public MEXC (api/v3/exchangeInfo, champ takerCommission) renvoie 0.0005
+#: soit 5.0 bps, identique a OKX, sur les quatre symboles interroges
+#: (BTCUSDT, NEARUSDT, ARBUSDT, PONSUSDT). Le classement d'univers produit
+#: par ce crible avant cette date sous-estimait donc le cout MEXC.
+#: Le meme bareme donne makerCommission = 0 : le frais MAKER MEXC est nul.
+FEES = {"OKX": 5.0, "Gate": 5.0, "MEXC": 5.0, "Bitget": 6.0,
         "Coinbase": 60.0, "Hyperliquid": 4.5}
+#: Frais MAKER publics. MEXC mesure (makerCommission 0). Les autres restent
+#: ESTIME : non interroges.
+MAKER_FEES = {"MEXC": 0.0, "OKX": 2.0}
 MIN_VOL_USD = 50_000.0                  # volume 24 h minimal pour etre retenu
 
 rows = []   # (venue, symbole, demi_spread_bps, sigma_j_bps, vol_usd)

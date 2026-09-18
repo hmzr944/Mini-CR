@@ -140,6 +140,23 @@ PLAFONDS = [
             "EXPERIMENT_REPORT — net a latence nulle et frais nuls"),
     Ceiling("fourniture de liquidite (maker)", -1.98, COST_DOMINATES, 72_000,
             "mm_bh.py — selection adverse > demi-spread sur 12/13"),
+    # PLANCHER DU COUT. Le mandat ordonne de travailler le COUT quand le brut
+    # existe et que le net est negatif. Le frais maker nul EXISTE : bareme
+    # public MEXC, makerCommission 0. En annulant entierement le terme de
+    # frais sur la bande de 30 h, 7/13 instruments ressortent positifs a
+    # 300 s — puis 0/17 survivent au test par blocs DISJOINTS suivi de
+    # Benjamini-Hochberg : le positif venait du recouvrement des fenetres.
+    # L'instrument a vraie capacite, BTC-USDT-SWAP, perd 0,86 bps par
+    # remplissage a FRAIS NULS avec t = -6,70 sur 55 743 remplissages.
+    # Le quasi-survivant DOT-USD-SWAP (p = 0,0034 contre 0,00294 exige)
+    # plafonne a 13,6 bps/jour en captant TOUT son flux agressif.
+    # Zero est le plancher des frais : aucune venue ne descend plus bas,
+    # donc aucune reduction de cout ne peut ouvrir cette famille.
+    Ceiling("fourniture de liquidite a FRAIS NULS (plancher du cout)", 13.60,
+            NO_MAGNITUDE, 97,
+            "fee_floor_bh.py — 0/17 survivent a BH par blocs disjoints ; "
+            "borne du quasi-survivant DOT-USD-SWAP, file supposee gagnee",
+            denominator=CAPITAL, aggregation=PAIR),
     Ceiling("dislocation transversale", -0.04, COST_DOMINATES, 22_465,
             "xsec.py — 0/56 cellules positives, frais nuls compris"),
     Ceiling("funding inter-venues OKX/Hyperliquid", -23.03, NOT_PERSISTENT, 26,
@@ -177,11 +194,23 @@ def build() -> Dashboard:
             "6,5 bps quand tout aller-retour en coute 8 a 31 : un rapport "
             "constant de 1 pour 5 a 1 pour 20. Ce n'est pas un defaut de "
             "mesure, c'est l'aspect d'une venue dense et concurrentielle vue "
-            "de l'exterieur avec des donnees publiques."),
+            "de l'exterieur avec des donnees publiques. "
+            "LE LEVIER COUT EST MAINTENANT FERME PAR MESURE. Le mandat "
+            "ordonne, quand le brut existe et que le net est negatif, de "
+            "travailler le COUT. Le frais maker NUL existe reellement : "
+            "bareme public MEXC, makerCommission 0, verifie. En annulant "
+            "entierement le terme de frais — plancher absolu, aucune venue "
+            "ne descend sous zero — 0/17 tests survivent a Benjamini-Hochberg "
+            "sur blocs disjoints, et l'unique instrument a vraie capacite "
+            "perd 0,86 bps par remplissage a frais nuls avec t = -6,70 sur "
+            "55 743 remplissages. Le cout n'etait donc pas le goulot non "
+            "plus : c'est la selection adverse, qui ne se negocie pas."),
         next_action=(
             "AUCUNE que je puisse justifier economiquement. Je ne propose pas "
             "une cinquieme variante des formes fermees, et je n'ai pas "
-            "d'observable qui rende une cinquieme FORME mesurable."),
+            "d'observable qui rende une cinquieme FORME mesurable. Le "
+            "dernier levier que le mandat designait — reduire le cout — a "
+            "ete pousse a son plancher arithmetique et ne suffit pas."),
         next_action_why=(
             "Ce n'est pas une limite de DONNEES : plus d'historique de funding "
             "validerait le 33,3 sans l'elever, et la concession de 0,26 bps "
