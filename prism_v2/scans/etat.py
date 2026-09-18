@@ -246,7 +246,19 @@ def build() -> Dashboard:
             "gagne +2,85 bps en apprentissage et perd -3,47 en test, et "
             "reste negative jusqu'a un frais maker de ZERO. Le goulot n'est "
             "donc ni le cout, ni le capital, ni l'absence de conditionnement "
-            "— c'est l'amplitude du signal conditionnel lui-meme."),
+            "— c'est l'amplitude du signal conditionnel lui-meme. "
+            "LA BOUCLE EST MAINTENANT FERMEE, et cela a un effet economique "
+            "mesure. Les maillons ATTRIBUTION -> APPRENTISSAGE -> ADAPTATION "
+            "n'existaient pas : la politique etait gelee et ne pouvait ni "
+            "diagnostiquer sa deception ni y reagir. Sur la meme fenetre, la "
+            "gelee perd 97,59 USD avec 194 trades et 106,99 de drawdown ; la "
+            "marche en avant perd 4,47 USD avec 27 trades et 9,04 de "
+            "drawdown. Elle mesure son propre biais (-6,235 bps), en fait la "
+            "barre a franchir, et s'arrete sur six segments sur huit. Ce "
+            "n'est PAS un PnL positif — la colonne reste BORNE SUP. — mais "
+            "c'est 95,4 % d'une source de pertes supprimee, et l'attribution "
+            "montre que l'ecart n'est imputable ni au cout (0,0000) ni a la "
+            "taille (0,0000)."),
         next_action=(
             "AUCUNE que je puisse justifier economiquement. Je ne propose pas "
             "une cinquieme variante des formes fermees, et je n'ai pas "
@@ -292,6 +304,15 @@ def build() -> Dashboard:
                  "plafond de l'API OKX, uniforme sur tous les instruments"))
     d.add(Metric("historique requis pour tester 14 j x 30 entrees", 420.0,
                  "jours", DERIVED, "30 fenetres independantes de 14 jours"))
+    d.add(Metric("perte simulee supprimee par l'adaptation", 95.4, "%",
+                 MEASURED,
+                 "policy_walkforward.py — gelee -97,59 USD contre marche en "
+                 "avant -4,47 USD sur la meme fenetre (BORNE SUP.)"))
+    d.add(Metric("drawdown supprime par l'adaptation", 91.5, "%", MEASURED,
+                 "policy_walkforward.py — 106,99 USD contre 9,04 USD"))
+    d.add(Metric("biais mesure de la politique", -6.235, "bps", MEASURED,
+                 "policy_walkforward.py — realise moins attendu, pondere par "
+                 "les trades ; devient la barre a franchir"))
     d.add(Metric("plancher de bruit de la mesure a 300 s", 19.61, "bps",
                  MEASURED,
                  "xsec_lead_null.py — 95e centile de la plage sous "

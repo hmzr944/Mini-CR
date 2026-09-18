@@ -96,22 +96,31 @@ class ActionValue:
         moyenne, n = e
         return moyenne * n / (n + self.prior_n)
 
-    def best(self, state: Dict[str, float], actions: Sequence[Action]
-             ) -> Tuple[Action, float]:
-        """Action de valeur maximale. NO_TRADE gagne les egalites.
+    def best(self, state: Dict[str, float], actions: Sequence[Action],
+             seuil_bps: float = 0.0) -> Tuple[Action, float]:
+        """Action de valeur maximale, si elle franchit le seuil.
 
-        Une action n'est retenue que si sa valeur est STRICTEMENT positive :
-        a valeur nulle ou negative, ne rien faire est toujours au moins aussi
-        bon et ne consomme ni capital ni capacite.
+        `seuil_bps` est la barre qu'une action doit depasser pour etre
+        choisie ; a zero, c'est la regle d'origine — agir des que la valeur
+        est strictement positive.
+
+        POURQUOI CE PARAMETRE EXISTE. Le retrecissement seul ne peut PAS
+        produire NO_TRADE. Il multiplie la valeur par n/(n+k), un facteur
+        toujours POSITIF : une cellule positive reste positive, simplement
+        plus petite, et franchit encore un seuil de zero. La premiere
+        version de la politique adaptative n'avait que ce levier ; sa
+        confiance est tombee d'un facteur cent sans que le nombre de trades
+        bouge. Pour qu'un retour d'experience puisse arreter le systeme, il
+        faut deplacer la BARRE, pas seulement rapetisser la valeur.
         """
-        meilleur, v_max = Action.NO_TRADE, 0.0
+        meilleur, v_max = Action.NO_TRADE, seuil_bps
         for a in actions:
             if not a.is_trade:
                 continue
             v = self.value(state, a)
             if v > v_max:
                 meilleur, v_max = a, v
-        return meilleur, v_max
+        return meilleur, (v_max if meilleur.is_trade else 0.0)
 
     def support(self) -> Tuple[int, int]:
         """(cellules, observations) — pour l'audit de densite."""

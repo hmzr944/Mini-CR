@@ -136,8 +136,8 @@ def build_samples(m: Market, builder: StateBuilder, horizon_rows: int,
 
 
 def run_policy(samples: Sequence[Sample], av: ActionValue,
-               actions: Sequence[Action], reserved_capital_usd: float
-               ) -> Ledger:
+               actions: Sequence[Action], reserved_capital_usd: float,
+               seuil_bps: float = 0.0) -> Ledger:
     """Applique la politique et remplit le registre.
 
     Une decision NO_TRADE est enregistree elle aussi : sans elle on ne peut
@@ -146,7 +146,7 @@ def run_policy(samples: Sequence[Sample], av: ActionValue,
     """
     led = Ledger(reserved_capital_usd=reserved_capital_usd)
     for s in samples:
-        a, predite = av.best(s.state, actions)
+        a, predite = av.best(s.state, actions, seuil_bps)
         if not a.is_trade:
             led.record(Decision(
                 ts_ms=s.ts_ms, instrument=s.inst_id, state=s.state,
