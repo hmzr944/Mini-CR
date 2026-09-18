@@ -292,6 +292,13 @@ def build() -> Dashboard:
                  "plafond de l'API OKX, uniforme sur tous les instruments"))
     d.add(Metric("historique requis pour tester 14 j x 30 entrees", 420.0,
                  "jours", DERIVED, "30 fenetres independantes de 14 jours"))
+    d.add(Metric("plancher de bruit de la mesure a 300 s", 19.61, "bps",
+                 MEASURED,
+                 "xsec_lead_null.py — 95e centile de la plage sous "
+                 "permutation, 46 blocs ; 3,9x le cout plancher de 5 bps"))
+    d.add(Metric("structure transversale a 300 s", None, "", UNKNOWN,
+                 "NON RESOLU : le bruit y depasse le cout, rien ne peut y "
+                 "etre distingue ; 58,9 h de panneau requises contre 6,5"))
     d.add(Metric("probabilite de fill maker", None, "%", UNKNOWN,
                  "aucun modele de file d'attente — tout fill maker est une borne sup."))
     return d
