@@ -7,8 +7,8 @@ import math
 import unittest
 
 from prism_v2.scans.pm_favlong import (bucket_test, cluster_in_bucket,
-                                       economics, kelly_fraction, price_at,
-                                       required_n, taker_fee)
+                                       economics, price_at, required_n,
+                                       taker_fee)
 
 
 class TestAncrage(unittest.TestCase):
@@ -126,15 +126,6 @@ class TestCouts(unittest.TestCase):
         ec = economics(b, 48.0, 5.0, 0.0)
         self.assertIn("p_exec", ec)          # jamais de KeyError silencieux
         self.assertTrue(math.isnan(ec["ev_net"]))
-
-
-class TestKelly(unittest.TestCase):
-    def test_pas_d_avantage_pas_de_mise(self):
-        self.assertLessEqual(kelly_fraction(0.95, 0.95), 1e-9)
-        self.assertLess(kelly_fraction(0.90, 0.95), 0.0)
-
-    def test_avantage_reel_donne_une_mise_positive(self):
-        self.assertGreater(kelly_fraction(0.99, 0.95), 0.0)
 
 
 if __name__ == "__main__":

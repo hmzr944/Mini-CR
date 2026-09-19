@@ -160,15 +160,13 @@ def required_n(p: float, edge_fraction: float = 0.5, t_target: float = 2.0
     return t_target ** 2 * p / (edge_fraction ** 2 * (1.0 - p))
 
 
-def kelly_fraction(w: float, p: float) -> float:
-    """Kelly pour l'achat d'un contrat binaire a p qui paie 1.
-
-    Mise f de la banque : gain (1/p - 1) avec probabilite w, perte totale
-    sinon. f* = w - (1 - w) * p / (1 - p). Negatif => ne pas jouer.
-    """
-    if not (0.0 < p < 1.0):
-        return 0.0
-    return w - (1.0 - w) * p / (1.0 - p)
+#: NOTE DE DIMENSIONNEMENT. Une version de ce module calculait aussi la mise
+#: optimale d'un pari binaire. Elle est retiree : le depot interdit cet
+#: identifiant par garde d'architecture (`test_no_kelly_anywhere`), et surtout
+#: elle ne servait a rien ici. Dimensionner suppose un avantage etabli ; aucun
+#: seau ne franchit sa porte statistique, et tous les intervalles de confiance
+#: contiennent zero. Calculer une mise sur une esperance non demontree, c'est
+#: amplifier une illusion d'echantillon — exactement ce que le mandat interdit.
 
 
 def main() -> int:
@@ -199,7 +197,7 @@ def main() -> int:
             continue
         print(f"=== {hb:.0f} h avant resolution · {len(rows)} marches ===")
         print(f"{'seau':>12s} {'n mar':>6s} {'n ev':>5s} {'prix':>7s} {'% OUI':>7s} "
-              f"{'ecart c':>8s} {'t':>6s} {'EV net':>8s} {'bps/j':>8s} {'Kelly':>7s}")
+              f"{'ecart c':>8s} {'t':>6s} {'EV net':>8s} {'bps/j':>8s}")
         for a, b in BUCKETS:
             raw_g = [r for r in rows if a <= r["p"] < b]
             g = cluster_in_bucket(raw_g)
@@ -207,11 +205,10 @@ def main() -> int:
             if not bt:
                 continue
             ec = economics(bt, hb, hs, fee_rate)
-            k = kelly_fraction(bt["w"], ec["p_exec"])
             all_cells.append({**ec, "hb": hb, "bucket": (a, b)})
             print(f"[{a:.2f},{b:.2f}) {len(raw_g):6d} {bt['n']:5d} {bt['p']:7.3f} "
                   f"{bt['w']:7.3f} {bt['edge_c']:8.2f} {bt['t']:6.2f} "
-                  f"{ec['ev_net']*100:7.2f}% {ec['bps_day']:8.0f} {k*100:6.1f}%")
+                  f"{ec['ev_net']*100:7.2f}% {ec['bps_day']:8.0f}")
         print()
     print("Puissance requise — evenements necessaires pour etablir a t=2 un")
     print("ecart valant la moitie du gain maximal, par zone de prix :")

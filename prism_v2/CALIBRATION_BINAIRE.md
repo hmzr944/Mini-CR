@@ -138,4 +138,4 @@ volume.
 ---
 
 *Aucun seuil, aucune hypothèse de coût, aucun frais n'a été modifié pour rendre
-un chiffre plus présentable. PnL réalisé : 0 €. 964 tests passent.*
+un chiffre plus présentable. PnL réalisé : 0 €. 962 tests passent.*
