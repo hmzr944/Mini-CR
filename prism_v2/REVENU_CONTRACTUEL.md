@@ -126,6 +126,61 @@ bilatérale y est ramassée du mauvais côté à mesure que l'issue se révèle 
 Ce qui reste, stable dans les 15 cellules et à tous les filtres, est la
 **médiane : +0,30 à +0,62 USD/jour, soit 3 à 6 bps/jour.**
 
+## 3.5 Pourquoi la dispersion ne sauve rien — et l'erreur qu'elle a failli me faire publier
+
+La part vaut `qm/(qm+qc)` : elle est **concave** en la taille. Disperser
+1 000 € sur dix marchés à 100 € capte donc bien plus de récompense que les
+concentrer — mesuré : **223 → 1 111 USD/jour**, un facteur 5. Pour un pool au
+prorata, la dispersion est la bonne stratégie de capital, et c'est exactement
+l'inverse de ce qui vaut pour un gros opérateur.
+
+Le résultat brut donnait alors **+7 814 bps/jour**. Il est faux, et la raison
+est structurelle.
+
+**Le critère sélectionne les marchés où `Q ≈ 0`, et `Q ≈ 0` a une cause.** Les
+dix marchés retenus ont un écart NATUREL de 11 à 41 cents pour une bande de
+récompense de 4,5 cents :
+
+| marché | écart naturel | bande | niveaux dans la bande |
+|---|---|---|---|
+| Shenzhen, température | **41 c** | 4,5 | 0 bid / 0 ask |
+| Hormuz, navigation | 27 c | 4,5 | 0 / 0 |
+| Shanghai, température | 24 c | 4,5 | 0 / 0 |
+| OpenAI, matériel grand public | 20 c | 4,5 | 0 / 0 |
+
+Pour toucher la récompense il faut coter **dans** la bande. Sur le marché
+Shenzhen, cela signifie acheter à 0,593 ce que le marché offre à 0,41 et
+vendre à 0,638 ce que le marché paie 0,82 : **on offre 18 cents par part à qui
+veut les prendre.** Personne ne cote ces marchés parce que `Q = 0` est leur
+évaluation correcte, pas un oubli.
+
+Les deux populations, mesurées :
+
+| groupe | n | demi-écart naturel | bande | récompense | remplissages pour effacer la journée |
+|---|---|---|---|---|---|
+| `Q ≈ 0` — personne ne cote | 17 | **5,5 c** | 4,5 c | 40,00 $/j | **20** |
+| `Q > 0` — le marché est coté | 85 | **0,5 c** | 4,5 c | 1,27 $/j | — |
+
+**Un défaut de mon propre simulateur, dit en entier.** Il cotait au milieu et
+ne remplissait que sur les mouvements du milieu. Dans un marché à 41 cents
+d'écart, un ordre au milieu est pris *instantanément* — le simulateur ne le
+voyait pas et **sous-estimait donc le coût précisément sur les marchés que le
+critère retenait**. La perte, elle, se calcule sans aucune trajectoire :
+`demi-écart naturel − demi-bande`.
+
+**La configuration saine, testée aussi.** Sur le second groupe la bande est
+neuf fois plus large que le marché : il existe une zone
+`demi-écart < s ≤ maxSpread` où l'on marque en restant **derrière** le
+meilleur prix. Testée à trois marges et cinq tailles de portefeuille, elle
+donne +2 233, −331, +626, +1 067 bps/jour à marge constante — **le signe
+change avec le nombre de marchés et avec la marge**, sans motif. Le net y est
+dominé par quelques issues d'inventaire, pas par un avantage systématique.
+
+**Et la part elle-même n'est pas stable.** `Q` relevé en série sur 25 marchés
+varie de **0 à 106,6** ; 9 sur 25 dépassent 10 au moins une fois. Un
+instantané de carnet ne peut pas porter le calcul de part, puisque la
+récompense est distribuée par échantillon d'une minute sur la journée entière.
+
 ## 4. Le fait structurel
 
 **Dans chaque marché d'incitation mesuré, la subvention est tarifée pour
