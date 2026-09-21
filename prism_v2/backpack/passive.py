@@ -259,3 +259,28 @@ def simulate_passive_fills(trades: Sequence[Trade],
             mo[h] = markout_bps(t.price, passive_is_buy, mid_before.mid, m.mid)
         out.append(PassiveFill(t.ts, t.price, t.size, passive_is_buy, hs, mo))
     return out
+
+
+def excess_markout_bps(markout: float, unconditional_drift: float) -> float:
+    """Markout NET de la derive que le marche avait de toute facon.
+
+    POURQUOI CETTE FONCTION EXISTE. Une mesure a un seul cote — n'examiner que
+    les achats passifs, par exemple — confond l'adverse selection avec la
+    DIRECTION du marche pendant la fenetre. Sur les 75 min collectees, le mid
+    a derive de +133,8 bps sur NEAR et +142,2 sur kBONK : un acheteur passif y
+    gagnait sans aucune competence, simplement parce que tout montait.
+
+    Le chiffre brut le montrait : markout +1,18 bps sur NEAR, ce qui ressemble
+    a l'absence d'adverse selection. Mais la derive INCONDITIONNELLE a 60 s,
+    mesuree a chaque instantane sans aucun fill, valait +1,36. L'acheteur
+    passif faisait donc MOINS BIEN que ne rien decider du tout : l'adverse
+    selection etait bien la, masquee par une fenetre haussiere.
+
+    Une mesure a DEUX cotes annule cette derive par construction, puisque les
+    achats et les ventes la subissent en sens inverse. C'est pourquoi le rejeu
+    a deux cotes donnait un resultat negatif la ou l'analyse a un seul cote
+    semblait positive. Quand un seul cote est examine, ce retranchement n'est
+    pas une option : c'est la correction sans laquelle le chiffre mesure une
+    tendance et non un mecanisme.
+    """
+    return markout - unconditional_drift

@@ -172,3 +172,23 @@ class TestSimulation(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestPlaceboDeDerive(unittest.TestCase):
+    """Un markout doit se lire contre la derive, pas contre zero."""
+
+    def test_un_markout_positif_sous_la_derive_est_en_fait_ADVERSE(self):
+        """Le cas NEAR, fige : markout +1,18 pour une derive de +1,36. Lu
+        contre zero il semble favorable ; lu contre la derive il est negatif."""
+        from prism_v2.backpack.passive import excess_markout_bps
+        self.assertGreater(1.18, 0.0)
+        self.assertLess(excess_markout_bps(1.18, 1.36), 0.0)
+
+    def test_un_marche_sans_derive_laisse_le_markout_inchange(self):
+        from prism_v2.backpack.passive import excess_markout_bps
+        self.assertAlmostEqual(excess_markout_bps(-2.0, 0.0), -2.0)
+
+    def test_la_correction_mord_dans_les_deux_sens(self):
+        """Une fenetre BAISSIERE flatterait le vendeur passif de la meme facon."""
+        from prism_v2.backpack.passive import excess_markout_bps
+        self.assertAlmostEqual(excess_markout_bps(-1.0, -3.0), 2.0)
