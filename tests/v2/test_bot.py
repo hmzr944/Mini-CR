@@ -10,11 +10,13 @@ from __future__ import annotations
 
 import unittest
 
-from prism_v2.bot import Bot, CycleReport, FundingObservation, render
-from prism_v2.core_types import Provenance
+from prism_v2.bot import (Bot, CycleReport, FundingObservation,
+                          _candidate_label, render)
+from prism_v2.core_types import Direction, Provenance
 from prism_v2.execution import PaperExecutor
 from prism_v2.instruments import InstrumentSpec, InstrumentType
 from prism_v2.opp_funding import VenueFunding
+from prism_v2.opportunity import Candidate
 from prism_v2.orderbook import OrderBook
 
 HOURS_PER_YEAR = 24 * 365
@@ -132,6 +134,49 @@ class TestBoucle(unittest.TestCase):
                             obs(-1.2, 1.2, base="SOL")])).run_cycle()
         self.assertIsNotNone(rep.best_net_bps)
         self.assertEqual(rep.n_accepted, 0)
+
+
+class TestEtiquetteAgnostiqueFamille(unittest.TestCase):
+    """Une brèche de couplage : le criblage générique lisait un champ propre
+    à UNE famille pour nommer la meilleure candidate.
+
+    `bot.py` accepte tout détecteur enregistré, mais nommait la meilleure
+    candidate via `observed_state['diff_apr']` — présent uniquement dans la
+    famille funding. Une candidate d'une autre famille (flux forcé,
+    liquidation) devenant la meilleure levait KeyError ; l'exception remontait
+    au `try` du cycle et les candidates SUIVANTES de la même observation
+    étaient perdues. Un cycle « propre » à zéro acceptation, indiscernable
+    d'un marché sans opportunité — le mode d'échec que le bot dit refuser.
+    """
+
+    def _cand(self, observed_state):
+        s = spec("SOL")
+        return Candidate(
+            ts_utc="2026-01-01T00:00:00Z", instrument=s,
+            direction=Direction.LONG, opportunity_type="forced_flow_fade",
+            gross_capture_bps=3.0, capacity_usd=1e6,
+            provenance=Provenance(exchange="OKX", endpoint="test",
+                                  fetched_at="2026-01-01T00:00:00Z",
+                                  inst_id=s.inst_id),
+            observed_state=observed_state)
+
+    def test_famille_funding_garde_son_etiquette_fine(self):
+        label = _candidate_label("ADA", self._cand({"diff_apr": 0.83}))
+        self.assertIn("ADA", label)
+        self.assertIn("%/an", label)
+        self.assertIn("+83", label)
+
+    def test_famille_sans_diff_apr_ne_leve_pas(self):
+        """LE RÉGRESSEUR : une candidate flux forcé ne porte pas diff_apr."""
+        cand = self._cand({"imbalance": 0.7, "amplitude": 42.0})
+        label = _candidate_label("SOL", cand)          # ne doit pas lever
+        self.assertIn("SOL", label)
+        self.assertIn("forced_flow_fade", label)
+        self.assertNotIn("%/an", label)
+
+    def test_diff_apr_non_numerique_retombe_sur_le_generique(self):
+        label = _candidate_label("BTC", self._cand({"diff_apr": None}))
+        self.assertIn("forced_flow_fade", label)
 
 
 class TestAucunOrdreReel(unittest.TestCase):
