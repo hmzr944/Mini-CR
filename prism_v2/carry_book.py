@@ -39,14 +39,34 @@ MAX_RESIDUAL_DRIFT_BPS = 250.0
 #: avant la mesure et non ajusté ensuite.
 MIN_T_STAT = 3.0
 
-#: Médiane / moyenne minimale du différentiel. En dessous, la moyenne est portée
-#: par la queue droite : la paire paie rarement et beaucoup, ce qui rend
-#: l'estimation fragile sur 95 jours d'historique.
-MIN_MEDIAN_OVER_MEAN = 0.30
+#: CORRIGE le 21/09/2026 (cf. CORRECTION_CAPACITE.md).
+#:
+#: Le critere precedent exigeait mediane/moyenne >= 0,30 sur le differentiel
+#: PAR REGLEMENT. C'etait la mauvaise grandeur : la position se tient N jours,
+#: soit 3N reglements, et la loi des grands nombres efface a cet horizon
+#: exactement l'irregularite que ce critere penalisait. Mesure, il s'est revele
+#: ANTI-CORRELE avec ce qui compte -- il rejetait ADA, DOT, SUI, UNI (3 blocs de
+#: 30 j positifs sur 3) et retenait ETH, SOL (2 sur 3).
+#:
+#: Le critere correct porte sur des BLOCS DISJOINTS a l'horizon de detention :
+#: tous doivent etre positifs. Un bloc = une observation independante.
+MIN_POSITIVE_BLOCK_RATIO = 1.0
+MIN_BLOCKS = 3
 
-#: Profondeur médiane minimale, en USD, sur 5 niveaux, sur CHACUNE des deux
-#: jambes. En dessous, on ne peut pas entrer sans bouger le marché.
-MIN_DEPTH_USD = 5_000.0
+#: CORRIGE le 21/09/2026 (cf. CORRECTION_CAPACITE.md).
+#:
+#: La capacite etait plafonnee a 25 % de la profondeur a 5 niveaux. C'est le bon
+#: critere pour un ordre qui doit passer MAINTENANT ; ce n'en est pas un pour une
+#: position tenue des semaines, qu'on entre sur plusieurs heures. Mesure, le
+#: volume 24 h vaut 45x a 9 875x la profondeur instantanee.
+#:
+#: On retient donc une PARTICIPATION au volume echange. 1 % est conservateur
+#: pour une entree patiente et sans urgence.
+VOLUME_PARTICIPATION = 0.01
+
+#: Volume 24 h minimal, en USD, sur la jambe CONTRAIGNANTE. En dessous, meme
+#: une entree patiente represente une part deraisonnable du flux.
+MIN_VOLUME_USD = 200_000.0
 
 #: Nombre minimal de règlements de funding communs aux deux jambes.
 MIN_SETTLEMENTS = 200
@@ -79,12 +99,14 @@ class Pair:
     imr_linear: float
     mmr_inverse: float                          #: marge de maintenance palier 1
     mmr_linear: float
-    depth_usd_inverse: float                    #: médiane, 5 niveaux
+    depth_usd_inverse: float                    #: médiane, 5 niveaux — informatif
     depth_usd_linear: float
     half_spread_inverse_bps: float
     half_spread_linear_bps: float
     worst_residual_drift_bps: float             #: pire dérive adverse 14 j
     residual_hours: int
+    volume_24h_usd_inverse: float = 0.0         #: ce qui borne vraiment la taille
+    volume_24h_usd_linear: float = 0.0
 
     # — grandeurs dérivées —
     @property
@@ -104,10 +126,24 @@ class Pair:
         sd = st.stdev(d)
         return st.fmean(d) / (sd / len(d) ** 0.5) if sd > 0 else 0.0
 
+    def holding_blocks(self, holding_days: float) -> List[float]:
+        """Differentiel moyen, en bps/jour, sur des blocs DISJOINTS de la duree
+        de detention. Chaque bloc est une observation independante."""
+        n = int(round(holding_days * 3))          # 3 reglements par jour
+        d = list(self.diff_bps_per_settlement)
+        if n < 1:
+            return []
+        return [st.fmean(d[i:i + n]) * 3.0 for i in range(0, len(d) - n + 1, n)]
+
+    def positive_block_ratio(self, holding_days: float) -> float:
+        b = self.holding_blocks(holding_days)
+        return sum(x > 0 for x in b) / len(b) if b else 0.0
+
     @property
-    def median_over_mean(self) -> float:
-        m = st.fmean(self.diff_bps_per_settlement)
-        return st.median(self.diff_bps_per_settlement) / m if m else 0.0
+    def deployable_usd(self) -> float:
+        """Notionnel soutenable : une part du volume de la jambe contraignante."""
+        return VOLUME_PARTICIPATION * min(self.volume_24h_usd_inverse,
+                                          self.volume_24h_usd_linear)
 
     @property
     def imr_sum(self) -> float:
@@ -194,11 +230,20 @@ class Book:
         """
         return min((p.safe_leverage() for p in self.pairs), default=0.0)
 
+    @property
     def capacity_usd(self) -> float:
-        """Notionnel par paire soutenable sans dépasser 25 % de la profondeur
-        visible de la jambe la plus fine."""
-        return min((0.25 * min(p.depth_usd_inverse, p.depth_usd_linear)
-                    for p in self.pairs), default=0.0)
+        """Notionnel TOTAL soutenable, somme des capacites par paire.
+
+        CORRIGE le 21/09/2026 : la version precedente bornait a 25 % de la
+        profondeur instantanee, ce qui est le critere d'un ordre urgent, pas
+        d'une position tenue des semaines. Voir CORRECTION_CAPACITE.md.
+        """
+        return sum(p.deployable_usd for p in self.pairs)
+
+    def max_capital_eur(self) -> float:
+        """Capital au-dela duquel la capacite mord, paire par paire."""
+        return sum(p.deployable_usd / p.safe_leverage() for p in self.pairs
+                   if p.safe_leverage() > 0)
 
     def net_bps_per_day_of_capital(self, holding_days: float, maker: bool) -> float:
         """R(T) = L x (r - c/T), en bps/jour de CAPITAL."""
@@ -213,7 +258,7 @@ class Book:
 
 # ─────────────────────────────── Sélection ───────────────────────────────────
 
-def select(pairs: Sequence[Pair]) -> Book:
+def select(pairs: Sequence[Pair], holding_days: float = 14.0) -> Book:
     """Applique les critères déclarés en tête de module, dans l'ordre.
 
     Chaque rejet est enregistré avec le critère et la valeur qui l'a causé :
@@ -224,6 +269,8 @@ def select(pairs: Sequence[Pair]) -> Book:
     kept: List[Pair] = []
     rejected: List[Rejection] = []
     for p in pairs:
+        blocks = p.holding_blocks(holding_days)
+        ratio = p.positive_block_ratio(holding_days)
         checks = [
             ("echantillon_funding", p.n, MIN_SETTLEMENTS, p.n >= MIN_SETTLEMENTS),
             ("heures_residu", p.residual_hours, MIN_RESIDUAL_HOURS,
@@ -231,12 +278,13 @@ def select(pairs: Sequence[Pair]) -> Book:
             ("derive_residu_14j", p.worst_residual_drift_bps, MAX_RESIDUAL_DRIFT_BPS,
              p.worst_residual_drift_bps <= MAX_RESIDUAL_DRIFT_BPS),
             ("t_differentiel", p.t_stat, MIN_T_STAT, p.t_stat >= MIN_T_STAT),
-            ("mediane_sur_moyenne", p.median_over_mean, MIN_MEDIAN_OVER_MEAN,
-             p.median_over_mean >= MIN_MEDIAN_OVER_MEAN),
-            ("profondeur_inverse", p.depth_usd_inverse, MIN_DEPTH_USD,
-             p.depth_usd_inverse >= MIN_DEPTH_USD),
-            ("profondeur_lineaire", p.depth_usd_linear, MIN_DEPTH_USD,
-             p.depth_usd_linear >= MIN_DEPTH_USD),
+            ("nb_blocs_detention", len(blocks), MIN_BLOCKS, len(blocks) >= MIN_BLOCKS),
+            ("blocs_positifs", ratio, MIN_POSITIVE_BLOCK_RATIO,
+             ratio >= MIN_POSITIVE_BLOCK_RATIO),
+            ("volume_inverse", p.volume_24h_usd_inverse, MIN_VOLUME_USD,
+             p.volume_24h_usd_inverse >= MIN_VOLUME_USD),
+            ("volume_lineaire", p.volume_24h_usd_linear, MIN_VOLUME_USD,
+             p.volume_24h_usd_linear >= MIN_VOLUME_USD),
         ]
         failed = next((c for c in checks if not c[3]), None)
         if failed:
@@ -250,9 +298,9 @@ def select(pairs: Sequence[Pair]) -> Book:
 
 LIMITES = """\
 1. L'historique de funding est plafonne a ~95 jours par l'API OKX (286 releves).
-   A 30 jours de detention, cela fait 3,2 fenetres independantes : le livre
-   n'est PAS valide hors echantillon, et ne peut pas l'etre sans collecte
-   forward.
+   Cela fait SIX blocs disjoints a 14 jours de detention, TROIS a 30 jours. Le
+   minimum atteignable pour p < 0,05 est 5 blocs ; a 30 jours il manque donc
+   55 jours de collecte. Le livre n'est PAS valide hors echantillon.
 2. Le cout maker suppose que le demi-spread encaisse est exactement neutralise
    par la selection adverse, et que les 4 jambes sont remplies passivement. Ni
    la probabilite de remplissage ni le markout ne sont mesures. En taker, le

@@ -19,10 +19,10 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from prism_v2.carry_book import (MAKER_FEE_BPS, MAX_RESIDUAL_DRIFT_BPS,
-                                 MIN_DEPTH_USD, MIN_MEDIAN_OVER_MEAN,
-                                 MIN_RESIDUAL_HOURS, MIN_SETTLEMENTS,
-                                 MIN_T_STAT, SAFETY_FACTOR, TAKER_FEE_BPS,
-                                 Book, Pair, select)
+                                 MIN_BLOCKS, MIN_RESIDUAL_HOURS,
+                                 MIN_SETTLEMENTS, MIN_T_STAT, MIN_VOLUME_USD,
+                                 SAFETY_FACTOR, TAKER_FEE_BPS,
+                                 VOLUME_PARTICIPATION, Book, Pair, select)
 
 
 def make_pair(coin="TEST", diff=None, **kw):
@@ -34,6 +34,7 @@ def make_pair(coin="TEST", diff=None, **kw):
         coin=coin, diff_bps_per_settlement=diff,
         imr_inverse=0.02, imr_linear=0.02, mmr_inverse=0.01, mmr_linear=0.01,
         depth_usd_inverse=50_000.0, depth_usd_linear=50_000.0,
+        volume_24h_usd_inverse=5_000_000.0, volume_24h_usd_linear=50_000_000.0,
         half_spread_inverse_bps=1.0, half_spread_linear_bps=1.0,
         worst_residual_drift_bps=100.0, residual_hours=9_000)
     base.update(kw)
@@ -96,14 +97,68 @@ def test_book_leverage_is_the_minimum_not_the_mean():
     assert b.leverage() < st.fmean([safe.safe_leverage(), risky.safe_leverage()])
 
 
-def test_capacity_caps_at_a_quarter_of_the_thinnest_leg():
-    b = Book(pairs=[make_pair(depth_usd_inverse=8_000.0, depth_usd_linear=90_000.0)])
-    assert b.capacity_usd() == pytest.approx(2_000.0)
+def test_capacity_comes_from_volume_not_from_instantaneous_depth():
+    """L'erreur corrigee le 21/09 : une position tenue des semaines s'entre sur
+    des heures, donc c'est le VOLUME qui borne, pas le carnet a l'instant t."""
+    p = make_pair(depth_usd_inverse=100.0,          # carnet minuscule
+                  volume_24h_usd_inverse=4_000_000.0,
+                  volume_24h_usd_linear=90_000_000.0)
+    assert p.deployable_usd == pytest.approx(VOLUME_PARTICIPATION * 4_000_000.0)
+    assert Book(pairs=[p]).capacity_usd == pytest.approx(40_000.0)
+
+
+def test_capacity_is_bound_by_the_thinner_leg():
+    p = make_pair(volume_24h_usd_inverse=1_000_000.0,
+                  volume_24h_usd_linear=99_000_000.0)
+    assert p.deployable_usd == pytest.approx(10_000.0)
+
+
+def test_max_capital_is_capacity_divided_by_leverage():
+    p = make_pair(volume_24h_usd_inverse=1_000_000.0,
+                  volume_24h_usd_linear=1_000_000.0)
+    b = Book(pairs=[p])
+    assert b.max_capital_eur() == pytest.approx(10_000.0 / p.safe_leverage())
+
+
+# ── le critere corrige : blocs a l'horizon de detention ─────────────────────
+
+def test_blocks_are_disjoint_and_sized_by_the_holding_period():
+    p = make_pair(diff=[1.0] * 300)
+    assert len(p.holding_blocks(14.0)) == 300 // 42      # 42 reglements par bloc
+    assert len(p.holding_blocks(30.0)) == 300 // 90
+
+
+def test_a_tail_driven_pair_is_KEPT_when_every_holding_block_is_positive():
+    """L'erreur corrigee : mediane par reglement nulle, mais tous les blocs de
+    detention positifs. C'est ADA, DOT, SUI, UNI -- rejetees a tort."""
+    tail = ([0.0] * 40 + [4.0] * 2) * 7                  # mediane 0, blocs > 0
+    p = make_pair(diff=tail)
+    assert st.median(tail) == 0.0
+    assert p.positive_block_ratio(14.0) == 1.0
+    assert select([p], holding_days=14.0).coins == ["TEST"]
+
+
+def test_a_pair_that_loses_on_one_holding_block_is_REJECTED():
+    """C'est ETH et SOL : median/moyenne flatteur, mais un bloc negatif."""
+    good = [1.0] * 42
+    bad = [-1.0] * 42
+    p = make_pair(diff=good * 5 + bad)
+    assert p.positive_block_ratio(14.0) < 1.0
+    book = select([p], holding_days=14.0)
+    assert book.pairs == []
+    assert book.rejected[0].criterion == "blocs_positifs"
+
+
+def test_too_few_blocks_is_rejected_rather_than_trusted():
+    """210 règlements = 2 blocs de 30 jours. Deux observations ne tranchent rien."""
+    p = make_pair(diff=[1.0 + 0.01 * (i % 5) for i in range(210)])
+    assert len(p.holding_blocks(30.0)) < MIN_BLOCKS
+    assert select([p], holding_days=30.0).rejected[0].criterion == "nb_blocs_detention"
 
 
 def test_empty_book_is_zero_everywhere_and_does_not_raise():
     b = Book(pairs=[])
-    assert b.leverage() == 0 and b.capacity_usd() == 0
+    assert b.leverage() == 0 and b.capacity_usd == 0 and b.max_capital_eur() == 0
     assert b.r_bps_per_day() == 0 and b.t_stat() == 0
     assert b.net_bps_per_day_of_capital(30, maker=True) == 0
 
@@ -119,8 +174,8 @@ def test_a_fully_compliant_pair_is_kept():
     (dict(diff=[0.3] * (MIN_SETTLEMENTS - 1)), "echantillon_funding"),
     (dict(residual_hours=MIN_RESIDUAL_HOURS - 1), "heures_residu"),
     (dict(worst_residual_drift_bps=MAX_RESIDUAL_DRIFT_BPS + 1), "derive_residu_14j"),
-    (dict(depth_usd_inverse=MIN_DEPTH_USD - 1), "profondeur_inverse"),
-    (dict(depth_usd_linear=MIN_DEPTH_USD - 1), "profondeur_lineaire"),
+    (dict(volume_24h_usd_inverse=MIN_VOLUME_USD - 1), "volume_inverse"),
+    (dict(volume_24h_usd_linear=MIN_VOLUME_USD - 1), "volume_lineaire"),
 ])
 def test_each_criterion_rejects_and_names_itself(kw, criterion):
     book = select([make_pair(**kw)])
@@ -136,18 +191,8 @@ def test_a_weak_t_stat_is_rejected():
     assert book.rejected[0].value < MIN_T_STAT
 
 
-def test_a_tail_driven_differential_is_rejected():
-    """Mediane nulle : la paire paie rarement et beaucoup. Rejetee."""
-    tail = [0.0] * 280 + [30.0] * 20        # moyenne 2,0 ; mediane 0,0 ; t eleve
-    p = make_pair(diff=tail)
-    assert p.t_stat > MIN_T_STAT            # elle passerait le test de significativite
-    assert p.median_over_mean < MIN_MEDIAN_OVER_MEAN
-    book = select([p])
-    assert book.rejected[0].criterion == "mediane_sur_moyenne"
-
-
 def test_rejection_is_reported_for_the_FIRST_failing_criterion_only():
-    book = select([make_pair(residual_hours=1, depth_usd_inverse=1.0)])
+    book = select([make_pair(residual_hours=1, volume_24h_usd_inverse=1.0)])
     assert len(book.rejected) == 1
     assert book.rejected[0].criterion == "heures_residu"
 
@@ -155,7 +200,7 @@ def test_rejection_is_reported_for_the_FIRST_failing_criterion_only():
 def test_an_empty_book_always_explains_itself():
     """La garde anti-faux-negatif : jamais de livre vide muet."""
     pairs = [make_pair("A", worst_residual_drift_bps=1e9),
-             make_pair("B", depth_usd_linear=0.0)]
+             make_pair("B", volume_24h_usd_linear=0.0)]
     book = select(pairs)
     assert book.pairs == []
     assert {r.coin for r in book.rejected} == {"A", "B"}
@@ -163,7 +208,7 @@ def test_an_empty_book_always_explains_itself():
 
 
 def test_selection_keeps_and_rejects_in_the_same_pass():
-    book = select([make_pair("GOOD"), make_pair("BAD", depth_usd_inverse=0.0)])
+    book = select([make_pair("GOOD"), make_pair("BAD", volume_24h_usd_inverse=0.0)])
     assert book.coins == ["GOOD"]
     assert [r.coin for r in book.rejected] == ["BAD"]
 

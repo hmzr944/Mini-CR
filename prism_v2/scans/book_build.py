@@ -13,14 +13,15 @@ import time
 import urllib.parse
 from pathlib import Path
 
-from prism_v2.carry_book import (LIMITES, MIN_DEPTH_USD, Pair, SAFETY_FACTOR,
-                                 select)
+from prism_v2.carry_book import (LIMITES, Pair, SAFETY_FACTOR,
+                                 VOLUME_PARTICIPATION, select)
 from prism_v2.funding_feed import OKX_BASE, _http_json
 
 ROOT = Path(__file__).resolve().parents[2]
 DEPTH_SAMPLES = 6          #: relevés de carnet espacés — jamais un instantané
 DEPTH_INTERVAL_S = 2.5
 RESIDUAL_WINDOW_H = 336    #: 14 jours
+HOLDING_DAYS = 14.0        #: horizon de detention auquel les blocs sont evalues
 
 
 def _get(path: str, **params):
@@ -110,6 +111,22 @@ def worst_adverse_drift_bps(residual: list[float], window: int = RESIDUAL_WINDOW
     return worst
 
 
+def volume_24h_usd(inst: str, spec: dict, tickers: dict) -> float:
+    """Volume echange sur 24 h, en USD. C'est ce qui borne la taille d'une
+    position patiente -- pas la profondeur a l'instant t (CORRECTION_CAPACITE.md)."""
+    t = tickers.get(inst)
+    if not t:
+        return 0.0
+    ctv = float(spec.get("ctVal", 1))
+    v = float(t.get("vol24h") or 0)
+    if spec.get("ctValCcy") == "USD":
+        return v * ctv
+    try:
+        return v * ctv * float(t["last"])
+    except (KeyError, TypeError, ValueError):
+        return 0.0
+
+
 def sample_book(inst: str, spec: dict) -> tuple[float, float]:
     """(profondeur médiane USD sur 5 niveaux, demi-spread médian bps)."""
     depths, spreads = [], []
@@ -137,6 +154,8 @@ def build() -> None:
     tiers = json.load(open(ROOT / "prism_v2/data/margin_tiers.json"))["families"]
     specs = {i["instId"]: i for i in (_get("/api/v5/public/instruments",
                                            instType="SWAP").get("data") or [])}
+    tickers = {x["instId"]: x for x in (_get("/api/v5/market/tickers",
+                                             instType="SWAP").get("data") or [])}
     cache = json.load(open(ROOT / "prism_v2/data/candles_1h.json"))
     ci = cache["fields"].index("close")
     cached = {k: {r[0]: r[ci] for r in v} for k, v in cache["data"].items()}
@@ -167,15 +186,20 @@ def build() -> None:
             imr_inverse=float(ti["imr"]), imr_linear=float(tl["imr"]),
             mmr_inverse=float(ti["mmr"]), mmr_linear=float(tl["mmr"]),
             depth_usd_inverse=di, depth_usd_linear=dl,
+            volume_24h_usd_inverse=volume_24h_usd(a, specs.get(a, {}), tickers),
+            volume_24h_usd_linear=volume_24h_usd(b, specs.get(b, {}), tickers),
             half_spread_inverse_bps=hi, half_spread_linear_bps=hl,
             worst_residual_drift_bps=worst_adverse_drift_bps(residual),
             residual_hours=len(hrs)))
         p = pairs[-1]
+        bl = p.holding_blocks(HOLDING_DAYS)
         print(f"  {c:5s} r={p.r_bps_per_day:6.3f} t={p.t_stat:5.2f} "
-              f"med/moy={p.median_over_mean:5.2f} prof={min(di,dl):9,.0f}$ "
+              f"blocs={sum(x>0 for x in bl)}/{len(bl)} "
+              f"vol24h={min(p.volume_24h_usd_inverse, p.volume_24h_usd_linear):13,.0f}$ "
+              f"déployable={p.deployable_usd:10,.0f}$ "
               f"dérive14j={p.worst_residual_drift_bps:6.1f}bps Lmax={p.max_leverage:4.1f}x")
 
-    book = select(pairs)
+    book = select(pairs, holding_days=HOLDING_DAYS)
 
     print(f"\n{'─'*72}\nREJETS (critère déclaré dans prism_v2/carry_book.py)")
     for r in book.rejected:
@@ -188,11 +212,13 @@ def build() -> None:
         return
 
     L = book.leverage()
-    cap = book.capacity_usd()
     print(f"  r livre          : {book.r_bps_per_day():.3f} bps/jour   t = {book.t_stat():.2f}")
     print(f"  levier retenu    : {L:.1f}x  (min des leviers sûrs, facteur {SAFETY_FACTOR:.0f}x)")
-    print(f"  plafond par paire: {cap:,.0f} USD de notionnel (25 % de la jambe la plus fine)")
-    print(f"  capital max      : {cap * len(book.pairs) / L:,.0f} EUR avant de dépasser ce plafond")
+    print(f"  notionnel déployable : {book.capacity_usd:,.0f} USD "
+          f"({VOLUME_PARTICIPATION:.0%} du volume 24 h de la jambe contraignante)")
+    print(f"  capital absorbable   : {book.max_capital_eur():,.0f} EUR")
+    eur = book.capacity_usd * (book.r_bps_per_day() - 8.0 / HOLDING_DAYS) / 1e4 * 365
+    print(f"  PnL à capacité pleine: {eur:,.0f} EUR/an (maker, {HOLDING_DAYS:.0f} j de détention)")
 
     print(f"\n  {'détention':>10s} {'maker bps/j':>12s} {'%/an':>8s} {'taker bps/j':>12s} {'%/an':>8s}")
     for T in (14, 30, 60, 90):
