@@ -137,11 +137,14 @@ _CATEGORIES = (
 
 
 def taker_rate_for(question: str) -> Optional[float]:
-    """Le taux taker de la categorie deduite du libelle, ou None.
+    """DEPRECIE — devinette par mots-cles, conservee comme dernier recours.
 
-    None n'est PAS zero : c'est l'aveu que la categorie n'a pas ete
-    identifiee, et `Fill.neutralisation_cost_usd` propage alors None plutot
-    que de chiffrer une protection gratuite.
+    Le chemin principal utilise desormais `fee_type.fetch_fee_rates`, qui lit
+    le champ `feeType` PUBLIE par la venue au lieu de le deviner. Cette
+    fonction ne sert que lorsque gamma ne couvre pas un condition_id ; elle
+    reste faillible et son resultat doit etre traite comme une hypothese, pas
+    une mesure. None n'est jamais zero : une categorie non identifiee laisse
+    le cout INCONNU.
     """
     q = (question or "").lower()
     for cat, keys in _CATEGORIES:
@@ -200,9 +203,17 @@ def allocate(ms: Sequence[SubsidisedMarket], capital: float,
 
 
 def evaluate(distance_cents: float, ms: Sequence[SubsidisedMarket],
-             books: Dict[str, dict], tapes: Dict[str, Tuple[List[Trade], float]]
+             books: Dict[str, dict], tapes: Dict[str, Tuple[List[Trade], float]],
+             fee_rates: Optional[Dict[str, Optional[float]]] = None
              ) -> Optional[Dict[str, float]]:
-    """Gross, cout de neutralisation et NET a une distance donnee."""
+    """Gross, cout de neutralisation et NET a une distance donnee.
+
+    `fee_rates` : {condition_id -> taux taker}, resolu de facon AUTORITAIRE
+    depuis le champ feeType de la venue. Un condition_id absent laisse le taux
+    a None (cout inconnu) ; on ne retombe sur la devinette par mots-cles que
+    faute de mieux, et c'est signale.
+    """
+    fee_rates = fee_rates or {}
     alloc = allocate(ms, CAPITAL_USD, distance_cents)
     rows: List[MarketEconomics] = []
     for m, cap in alloc:
@@ -249,9 +260,13 @@ def evaluate(distance_cents: float, ms: Sequence[SubsidisedMarket],
                 comp = (1.0 - m.best_bid) if (qt.is_bid and m.best_bid
                                               is not None) else (
                     (1.0 - m.best_ask) if m.best_ask is not None else None)
+                # Taux AUTORITAIRE (feeType publie) ; devinette en dernier
+                # recours seulement si la venue n'a pas couvert ce marche.
+                rate = fee_rates.get(m.condition_id)
+                if rate is None and m.condition_id not in fee_rates:
+                    rate = taker_rate_for(m.question)
                 fills.append(Fill(price_paid=qt.price, complement_ask=comp,
-                                  shares=f.size,
-                                  taker_rate=taker_rate_for(m.question)))
+                                  shares=f.size, taker_rate=rate))
         rows.append(MarketEconomics(
             question=m.question, pool_usdc_per_day=m.pool_usdc_per_day,
             share=share, capital_usd=cap, fills=fills,
@@ -277,6 +292,7 @@ def evaluate(distance_cents: float, ms: Sequence[SubsidisedMarket],
 
 
 def main() -> None:
+    from prism_v2.subsidy.fee_type import fetch_fee_rates_for
     ms = eligible_markets()
     print(f"marches subventionnes eligibles : {len(ms)}")
     toks = [t for m in ms for t in (m.token_yes, m.token_no)]
@@ -292,6 +308,14 @@ def main() -> None:
     order = sorted(wanted, key=lambda c: -by_id[c].pool_usdc_per_day)[:MAX_TAPES]
     print(f"marches retenus par l'allocation : {len(wanted)}, "
           f"bandes recuperees : {len(order)}")
+
+    # Frais AUTORITAIRES pour EXACTEMENT les marches retenus (ciblage par
+    # condition_id : le balayage general de gamma plafonne et ne les couvre pas).
+    fee_rates = fetch_fee_rates_for(wanted)
+    covered = sum(1 for c in wanted if c in fee_rates)
+    free = sum(1 for c in wanted if fee_rates.get(c) == 0.0)
+    print(f"frais resolus par feeType        : {covered} / {len(wanted)} "
+          f"(dont {free} SANS frais taker — neutralisation au spread seul)")
 
     tapes: Dict[str, Tuple[List[Trade], float]] = {}
     for cid in order:
@@ -314,7 +338,7 @@ def main() -> None:
           f"{'NET $/j':>10}{'%/jour':>9}{'rempl./j':>10}{'cout inconnu':>14}")
     best = None
     for d in DISTANCES_CENTS:
-        r = evaluate(d, live, books, tapes)
+        r = evaluate(d, live, books, tapes, fee_rates)
         if r is None:
             print(f"{d:>7.1f}{'—':>9}{'aucun marche exploitable':>53}")
             continue
@@ -342,13 +366,32 @@ def main() -> None:
           f"{(100.0 * best['cost'] / best['gross']) if best['gross'] else 0:.1f} %")
     print(f"\nCIBLE : 2.720 %/jour")
     if pct > 0:
-        print(f"ECART : facteur {2.720 / pct:.2f}")
-        print(f"\n60 jours composes a ce net : "
-              f"{CAPITAL_USD * (1.0 + pct / 100.0) ** 60:,.0f} EUR depuis 1 000")
+        print(f"ECART : facteur {2.720 / pct:.2f}  (la BORNE depasse la cible)")
     else:
         print("NET NEGATIF : la famille est tuee par son propre cout.")
-    print("\nSTATUT : BORNE SUPERIEURE. File d'attente supposee entierement")
-    print("perdue, neutralisation au meilleur complement, pool constant.")
+
+    # PAS DE COMPOSITION D'UNE BORNE. Composer ce pct sur 60 jours donnerait
+    # un nombre spectaculaire et FAUX pour deux raisons independantes, toutes
+    # deux DEJA mesurees dans ce depot :
+    #   1. c'est une BORNE SUPERIEURE (file perdue -> remplissages et donc cout
+    #      sous-estimes ; part au prorata plat >= part quadratique reelle ;
+    #      disponibilite parfaite ; concurrents statiques). Le realise sera
+    #      plus bas, d'un facteur non encore mesure.
+    #   2. le rendement NE PASSE PAS A L'ECHELLE. subsidy_capacity.py a mesure
+    #      l'effondrement du marginal : ~4,7 %/jour de brut a 1 000 $, mais le
+    #      millier suivant a 5 000 $ ne rend plus que ~0,73 %/jour. La part du
+    #      pool tend vers 1 et le capital supplementaire n'achete plus rien.
+    #      On ne peut donc PAS composer 1 000 -> 5 000 a ce taux : la source se
+    #      dilue exactement dans la zone de la cible.
+    print("\nCE QUE CE N'EST PAS : une prevision, ni un rendement composable.")
+    print("La composition sur 60 jours est REFUSEE ici — voir "
+          "subsidy_capacity.py :")
+    print("  le rendement s'effondre quand le capital monte (4,7 %/j a 1 000 $")
+    print("  -> 0,73 %/j marginal a 5 000 $), donc la trajectoire 1 000 -> 5 000")
+    print("  ne tient pas, quel que soit le net instantane.")
+    print("\nSTATUT : BORNE SUPERIEURE. Prochaine etape obligee : mesurer le")
+    print("REALISE en papier (position de file et disponibilite reelles),")
+    print("pas etendre cette borne.")
     print("=" * 74)
 
 

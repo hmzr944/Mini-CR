@@ -81,11 +81,24 @@ UNKNOWNS: Dict[str, str] = {
 }
 
 
-#: Taux de frais TAKER par categorie, tels que publies. La categorie
-#: geopolitique est a zero : c'est le seul endroit ou neutraliser ne coute
-#: que le spread.
+#: Taux de frais TAKER par categorie. Bareme V2, en vigueur le 30 mars 2026,
+#: verifie contre la documentation publique (docs.polymarket.us/fees,
+#: help.polymarket.com « Trading Fees ») en septembre 2026. Le taux se lit
+#: dans la formule fee = parts * taux * p * (1 - p) : a p = 0,50, taux 0,04
+#: donne 1,00 $/100 parts, ce qui reconcilie exactement le bareme annonce
+#: « max 1,00 $/100 parts » pour politics/finance/tech/mentions.
+#:
+#: Deux faits de ce bareme decident du choix de marche :
+#:   - GEOPOLITIQUE et evenements mondiaux : ZERO frais taker. Neutraliser un
+#:     inventaire n'y coute que le spread. C'est la que le net a le plus de
+#:     chances d'etre positif, et donc la que le recolteur doit chercher.
+#:   - Les MAKERS ne paient rien ET recoivent un REBATE finance par les frais
+#:     taker, redistribue quotidiennement au prorata. C'est un SECOND flux de
+#:     subvention, distinct du pool de « liquidity rewards » — non encore
+#:     modelise ici, et qui ne peut qu'AMELIORER le net mesure. On ne le
+#:     compte donc pas : l'ignorer garde le net conservateur.
 TAKER_FEE_RATES = {"geopolitical": 0.00, "politics": 0.04, "finance": 0.04,
-                   "tech": 0.04, "mentions": 0.04, "sports": 0.05,
+                   "tech": 0.04, "mentions": 0.04, "sports": 0.03,
                    "economics": 0.05, "culture": 0.05, "weather": 0.05,
                    "other": 0.05, "crypto": 0.07}
 
