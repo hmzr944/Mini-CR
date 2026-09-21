@@ -63,6 +63,12 @@ class MarketState:
     forced_flow: List[ForcedFlowEvent] = field(default_factory=list)
     mid_history: List[tuple] = field(default_factory=list)   # (ts_ms, mid)
     depth_history: List[tuple] = field(default_factory=list) # (ts_ms, bid_usd, ask_usd)
+    #: (ts_ms, spread_bps). AJOUTE le 21/09/2026 : DepthWithdrawalDetector
+    #: pretendait comparer le spread courant a son historique, mais aucune
+    #: structure ne portait ce passe. Il substituait le spread COURANT a chaque
+    #: observation passee, rendant sa porte vide et le detecteur muet pour
+    #: toujours. Voir AUTOPSIE_FAMILLES.md.
+    spread_history: List[tuple] = field(default_factory=list)
 
     # ── contexte externe ─────────────────────────────────────────────────
     funding_rate: Optional[float] = None
@@ -285,6 +291,7 @@ class MarketStateTracker:
     forced: Dict[str, Deque[ForcedFlowEvent]] = field(default_factory=dict)
     mids: Dict[str, Deque[tuple]] = field(default_factory=dict)
     depths: Dict[str, Deque[tuple]] = field(default_factory=dict)
+    spreads: Dict[str, Deque] = field(default_factory=dict)
     funding: Dict[str, float] = field(default_factory=dict)
 
     def _dq(self, store: Dict[str, Deque], key: str) -> Deque:
@@ -308,10 +315,13 @@ class MarketStateTracker:
             return
         m = self._dq(self.mids, iid)
         d = self._dq(self.depths, iid)
+        sp = self._dq(self.spreads, iid)
         m.append((book.ts_ms, mid))
         d.append((book.ts_ms, bd, ad))
+        sp.append((book.ts_ms, book.spread_bps))
         self._prune(m, book.ts_ms, lambda x: x[0])
         self._prune(d, book.ts_ms, lambda x: x[0])
+        self._prune(sp, book.ts_ms, lambda x: x[0])
 
     def on_trade(self, inst_id: str, trade: TradePrint) -> None:
         dq = self._dq(self.trades, inst_id)
@@ -337,6 +347,7 @@ class MarketStateTracker:
             forced_flow=list(self.forced.get(inst_id, [])),
             mid_history=list(self.mids.get(inst_id, [])),
             depth_history=list(self.depths.get(inst_id, [])),
+            spread_history=list(self.spreads.get(inst_id, [])),
             funding_rate=self.funding.get(inst_id), window_ms=self.window_ms)
 
     def all_states(self, now_ms: Optional[int] = None) -> Dict[str, MarketState]:

@@ -61,10 +61,26 @@ class BookImbalanceDetector(Detector):
     """Deviation du microprix par rapport au mid.
 
     Le microprix pondere le mid par les tailles opposees au touch. Son ecart
-    au mid est une mesure de PRESSION de carnet directement observable. On
-    n'emet que si cet ecart depasse le spread : en dessous, meme une
-    convergence parfaite ne couvrirait pas la traversee.
+    au mid est une mesure de PRESSION de carnet directement observable.
+
+    CORRIGE le 21/09/2026. La porte exigeait `|deviation| > spread`. Or le
+    microprix est une moyenne ponderee de bid et ask : il vit dans [bid, ask],
+    donc |deviation| <= spread/2 PAR CONSTRUCTION. La porte etait
+    mathematiquement infranchissable et cette famille n'a jamais pu emettre un
+    seul candidat -- verifie sur 20 000 carnets aleatoires couvrant sept ordres
+    de grandeur : rapport maximal observe 0,500000 contre 1,0 exige.
+
+    Le seuil etait de surcroit ECONOMIQUE (le cout d'une traversee taker) place
+    dans un DETECTEUR, alors que l'architecture du depot enonce que le
+    detecteur ne doit jamais decider qu'une opportunite est rentable. Le seuil
+    est desormais un plancher de SIGNIFICATIVITE -- la deviation doit etre une
+    fraction non negligeable du spread -- et c'est `economics.evaluate` qui
+    tranche la rentabilite, avec l'hypothese d'execution explicite.
     """
+
+    #: Fraction du demi-spread en dessous de laquelle la deviation n'est que du
+    #: bruit d'arrondi de taille. Choisi avant mesure, non ajuste ensuite.
+    MIN_DEVIATION_FRACTION_OF_HALF_SPREAD = 0.25
 
     family = Family.BOOK_IMBALANCE
 
@@ -73,11 +89,13 @@ class BookImbalanceDetector(Detector):
         if dev is None:
             return DetectionOutcome.insufficient(
                 self.family, "microprix non calculable (carnet incomplet)")
-        floor = state.spread_bps
-        if abs(dev) <= floor:
+        half = state.spread_bps / 2.0
+        floor = half * self.MIN_DEVIATION_FRACTION_OF_HALF_SPREAD
+        if half <= 0 or abs(dev) <= floor:
             return DetectionOutcome.nothing(
-                self.family, f"deviation du microprix {dev:.4f} bps sous le "
-                             f"spread ({floor:.4f} bps)")
+                self.family, f"deviation du microprix {dev:.4f} bps sous "
+                             f"{self.MIN_DEVIATION_FRACTION_OF_HALF_SPREAD:.0%} "
+                             f"du demi-spread ({floor:.4f} bps)")
         direction = Direction.LONG if dev > 0 else Direction.SHORT
         return DetectionOutcome.ok(self.family, [_mk(
             state, self, "MICROPRICE_DEVIATION", direction, abs(dev),
@@ -113,17 +131,21 @@ class DepthWithdrawalDetector(Detector):
             return DetectionOutcome.nothing(
                 self.family, f"aucun retrait de profondeur sur {self.lookback_ms}ms "
                              f"(ratios {ratios})")
-        # Elargissement du spread par rapport au minimum observe sur la fenetre.
+        # Elargissement du spread par rapport au minimum REELLEMENT observe.
         past_spreads = self._past_spreads(state)
         if not past_spreads:
+            # Donnee manquante -> le dire. La version precedente substituait le
+            # spread COURANT a chaque observation passee et rendait « rien
+            # trouve », ce qui est indiscernable d'un vrai resultat negatif.
             return DetectionOutcome.insufficient(
-                self.family, "pas d'historique de spread exploitable")
+                self.family, "pas d'historique de spread sur la fenetre",
+                ["spread_history"])
         tightest = min(past_spreads)
         excess = state.spread_bps - tightest
-        if excess <= tightest:
+        if excess <= 0.0:
             return DetectionOutcome.nothing(
                 self.family, f"spread {state.spread_bps:.4f} bps contre un minimum "
-                             f"de {tightest:.4f} bps : elargissement insuffisant")
+                             f"passe de {tightest:.4f} bps : aucun elargissement")
         return DetectionOutcome.ok(self.family, [_mk(
             state, self, "DEPTH_WITHDRAWAL_SPREAD_EXCESS", Direction.LONG, excess,
             "ask", self.lookback_ms, "MAKER",
@@ -134,12 +156,19 @@ class DepthWithdrawalDetector(Detector):
                  "Le prendre en taker revient a payer le spread elargi.")})])
 
     def _past_spreads(self, state: MarketState) -> List[float]:
-        out: List[float] = []
-        for ts, bid_usd, ask_usd in state.depth_history:
-            if bid_usd > 0 and ask_usd > 0:
-                out.append(state.spread_bps)   # borne basse: spread courant
-        # On utilise l'historique des mids pour estimer la variation relative.
-        return out or [state.spread_bps]
+        """Spreads REELLEMENT observes sur la fenetre, hors instant courant.
+
+        CORRIGE le 21/09/2026. La version precedente parcourait
+        `depth_history` -- qui ne contient aucun spread -- et ajoutait
+        `state.spread_bps` a chaque tour. `min(past)` valait donc le spread
+        courant, `excess` valait 0, et la porte `excess <= tightest` etait
+        vraie pour tout carnet non croise. Le detecteur rendait « rien trouve »
+        sur N'IMPORTE QUELLE entree : 72 configurations balayees, retrait de
+        profondeur jusqu'a 99 %, spread jusqu'a 5000 bps, zero candidat.
+        """
+        cutoff = state.ts_ms - self.lookback_ms
+        return [sp for ts, sp in state.spread_history
+                if cutoff <= ts < state.ts_ms and sp > 0]
 
 
 class AggressiveFlowDetector(Detector):
