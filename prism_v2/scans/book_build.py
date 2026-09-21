@@ -10,24 +10,32 @@ from __future__ import annotations
 import json
 import statistics as st
 import time
+import urllib.parse
 from pathlib import Path
-
-import requests
 
 from prism_v2.carry_book import (LIMITES, MIN_DEPTH_USD, Pair, SAFETY_FACTOR,
                                  select)
+from prism_v2.funding_feed import OKX_BASE, _http_json
 
-OKX = "https://www.okx.com"
 ROOT = Path(__file__).resolve().parents[2]
-DEPTH_SAMPLES = 8          #: relevés de carnet espacés — jamais un instantané
-DEPTH_INTERVAL_S = 4.0
+DEPTH_SAMPLES = 6          #: relevés de carnet espacés — jamais un instantané
+DEPTH_INTERVAL_S = 2.5
 RESIDUAL_WINDOW_H = 336    #: 14 jours
 
 
 def _get(path: str, **params):
+    """GET JSON via le client stdlib du depot.
+
+    prism_v2 n'a AUCUNE dependance tierce, et un garde d'architecture le
+    verifie (tests/v2/test_architecture.py). On passe donc par
+    funding_feed._http_json (urllib), pas par requests.
+    """
+    url = f"{OKX_BASE}{path}"
+    if params:
+        url += "?" + urllib.parse.urlencode(params)
     for _ in range(4):
         try:
-            return requests.get(f"{OKX}{path}", params=params, timeout=20).json()
+            return _http_json(url)
         except Exception:
             time.sleep(1.5)
     return {}
@@ -41,21 +49,29 @@ def inverse_linear_universe() -> list[str]:
     return sorted(inv & lin)
 
 
-def funding(inst: str, pages: int = 30) -> dict[int, float]:
-    out, after = {}, None
-    for _ in range(pages):
-        p = {"instId": inst, "limit": 100}
-        if after:
-            p["after"] = after
-        d = _get("/api/v5/public/funding-rate-history", **p).get("data") or []
-        if not d:
-            break
-        for r in d:
-            out[int(r["fundingTime"])] = float(r.get("realizedRate") or r["fundingRate"])
-        after = d[-1]["fundingTime"]
-        if len(d) < 100:
-            break
-        time.sleep(0.12)
+FUNDING_STORE = ROOT / "prism_v2" / "data" / "funding_forward"
+
+
+def funding(inst: str) -> dict[int, float]:
+    """Lit le magasin VERSIONNE, pas l'API.
+
+    `tools/collect_funding_forward.py` est la seule porte d'entree du funding :
+    lui seul appelle OKX, et il accumule au-dela des 95 jours que l'API rend.
+    Relire l'API ici gaspillerait le quota et PERDRAIT l'historique deja
+    accumule au-dela de la fenetre.
+    """
+    path = FUNDING_STORE / f"{inst}.jsonl"
+    if not path.exists():
+        return {}
+    out = {}
+    for line in path.read_text().splitlines():
+        if not line.strip():
+            continue
+        try:
+            ts, rate = json.loads(line)
+            out[int(ts)] = float(rate)
+        except Exception:
+            continue
     return out
 
 
@@ -131,7 +147,8 @@ def build() -> None:
         fi, fl = funding(a), funding(b)
         ts = sorted(set(fi) & set(fl))
         if not ts:
-            print(f"  {c}: pas de funding commun — ignorée"); continue
+            print(f"  {c}: pas de funding dans le magasin — lancer d'abord "
+                  f"tools/collect_funding_forward.py"); continue
         diff = [(fi[t] - fl[t]) * 1e4 for t in ts]
 
         A = cached.get(a) or candles(a)
