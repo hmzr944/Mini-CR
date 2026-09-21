@@ -126,3 +126,48 @@ rendement, il faut du capital, et la capacité s'arrête vers 12 500 €.
 
 Ce n'est toujours pas « du profit en quantité ». C'est un rendement défendable
 sur un capital modeste, et il n'est pas encore validé.
+
+---
+
+## Le livre, vérifié de bout en bout par le code corrigé
+
+`python3 -m prism_v2.scans.book_build`, 21/09/2026, critère à 14 jours :
+
+```
+REJETS (critère déclaré dans prism_v2/carry_book.py)
+  ADA   blocs_positifs      0.83   seuil 1.00      SOL   blocs_positifs   0.83
+  ETH   blocs_positifs      0.67   seuil 1.00      SUI   blocs_positifs   0.83
+  LINK  blocs_positifs      0.67                   UNI   blocs_positifs   0.83
+  LTC   blocs_positifs      0.67                   BTC   t_differentiel   1.96
+  DOGE  derive_residu_14j 387.02   seuil 250       FIL   derive_residu  950.24
+  XRP   derive_residu_14j 669.77                   HYPE  heures_residu   1845
+
+LIVRE RETENU : ['BCH', 'DOT', 'ETC']
+  r livre              : 1,137 bps/jour   t = 12,55
+  levier retenu        : 14,3x  (facteur de sécurité 3x sur le résidu)
+  notionnel déployable : 11 314 USD
+  capital absorbable   : 792 EUR
+  PnL à capacité pleine: 234 EUR/an (maker, 14 j)
+```
+
+| détention | maker | taker |
+|---|---|---|
+| 14 j | +8,08 bps/j — **34,3 %/an** | −15,05 bps/j |
+| 30 j | +12,44 bps/j — **57,4 %/an** | +1,64 bps/j |
+| 60 j | +14,34 bps/j — 68,7 %/an | +8,94 bps/j |
+| 90 j | +14,98 bps/j — 72,7 %/an | +11,38 bps/j |
+
+**La tension est explicite et ne se résout pas avec les données actuelles :**
+
+- À **14 jours**, six blocs disjoints — `p = 0,016` par paire. C'est la
+  configuration la mieux étayée, et elle rend **34,3 %/an sur 792 €, soit
+  234 €/an**.
+- À **30 jours et au-delà**, le taux monte à 57–73 %/an, mais il ne reste que
+  **trois** blocs : `p = 0,125`, significatif pour aucune paire.
+- Le capital absorbable est **792 €** parce que BCH, DOT et ETC sont
+  précisément les instruments les plus fins. Les paires profondes — ETH, SOL,
+  BTC — échouent toutes au test « tous les blocs positifs ».
+
+**C'est le nœud** : ce qui paie n'a pas de volume, ce qui a du volume ne paie
+pas. Aucun réglage ne dénoue cela ; seule la collecte peut dire si le
+différentiel des paires profondes est réel ou nul.
