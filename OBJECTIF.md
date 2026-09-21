@@ -65,14 +65,21 @@ nombre que la méthode ne peut pas fabriquer.
 
 ## 3. L'ordre de grandeur honnête
 
-Les mesures de `AUDIT_V33_INDEPENDANT.md` donnent, pour la seule famille
-ouverte — le carry inverse/linéaire même sous-jacent sur OKX — un rendement de
-l'ordre de **quelques dizaines de pourcents par an**, sous trois conditions dont
-aucune n'est acquise : exécution **maker**, persistance du différentiel hors des
-95 jours mesurés, et absence de cascade pire que celle du 10/10/2025 pendant une
-détention.
+Le livre a été construit (`LIVRE_CARRY.md`, `prism_v2/scans/book_build.py`).
+Onze paires sur quinze sont rejetées par un critère nommé ; quatre survivent —
+**BCH, ETH, LTC, SOL**, flux 0,585 bps/jour, t = 9,96.
 
-**Ce n'est pas ×5 en 60 jours. C'est ce que la mesure soutient.**
+Le rendement est de **18 à 29 %/an** selon la durée de détention, en exécution
+maker. Mais ce pourcentage est trompeur, et voici le vrai chiffre :
+
+> **Le PnL en euros vaut ≈ 144 €/an, et il est INVARIANT au levier et au
+> capital.** `€/jour = (r − c/T)/10⁴ × notionnel`, et le notionnel est plafonné
+> par la **profondeur des carnets coin-margés**, pas par l'argent disponible.
+> À 3× comme à 14×, c'est 0,39 €/jour.
+
+Ce n'est pas ×5 en 60 jours, et ce n'est pas non plus « quelques dizaines de
+pourcents sur le capital qu'on veut ». C'est **une borne de capacité d'environ
+144 € par an**, que ni le capital ni le levier ne déplacent.
 
 Et il y a une contrainte de forme, pas seulement de taille : cette famille se
 tient sur **des semaines**, pas des minutes. Le projet cherchait de la fréquence
@@ -121,10 +128,13 @@ dépôt, avec son commit.
 | Ordres réels émis | **0** |
 | V33 | **gelé** — invalidé hors échantillon, ne pas relancer |
 | Famille ouverte | carry inverse/linéaire même sous-jacent, 15 paires |
-| Étape en cours | **1 — hors échantillon** |
-| Collecte forward | active, quotidienne, 8 553 relevés amorcés le 21/09 |
+| Livre cible | BCH, ETH, LTC, SOL — 12 408 USD de notionnel, levier 14,3× |
+| Plafond économique mesuré | **≈ 144 €/an**, borné par la profondeur |
+| Étape en cours | **1 et 2 en parallèle** |
+| Collecte forward | funding quotidien + touch 4×/jour, actives depuis le 21/09 |
 | Bloqueur nommé | l'API OKX ne rend que 95 jours ; l'OOS ne peut que se collecter |
-| Inconnue suivante | probabilité de remplissage passif (étape 2) |
+| Question ouverte n° 1 | le différentiel BTC est-il réel ? t = 1,96, et BTC porte 11× la profondeur de tout le livre |
+| Question ouverte n° 2 | le même mécanisme sur un carnet coin-margé profond ailleurs (Binance COIN-M, Bybit inverse) — **non testable depuis cet environnement** : HTTP 451 et 403 |
 
 **Question tranchée depuis l'audit** : la compensation de marge entre jambe
 inverse et jambe linéaire (« risk unit merge ») existe bien chez OKX, mais exige
