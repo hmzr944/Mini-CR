@@ -286,18 +286,31 @@ def build() -> Dashboard:
             "montre que l'ecart n'est imputable ni au cout (0,0000) ni a la "
             "taille (0,0000)."),
         next_action=(
-            "AUCUNE que je puisse justifier economiquement. Je ne propose pas "
-            "une cinquieme variante des formes fermees, et je n'ai pas "
-            "d'observable qui rende une cinquieme FORME mesurable. Le "
-            "dernier levier que le mandat designait — reduire le cout — a "
-            "ete pousse a son plancher arithmetique et ne suffit pas."),
+            "MESURER LE FLUX SUBI SUR LES MARCHES SUBVENTIONNES. Une FORME de "
+            "gain que ce registre n'avait jamais examinee a ete mesuree : la "
+            "SUBVENTION. Polymarket publie, par marche, un montant quotidien "
+            "en USDC verse aux ordres qui dorment dans une bande autour du "
+            "mid — un contrat, pas une anticipation. Il n'y a rien a predire, "
+            "et le maker n'y paie aucun frais. Avec la formule publiee "
+            "(score decroissant en CARRE de la distance au mid, cote le plus "
+            "faible retenu) et quatre filtres declares d'avance, 1 000 EUR "
+            "captent 4,77 %/jour BRUT contre 2,72 vises : scans/subsidy.py. "
+            "La prochaine action n'est PAS de coter. C'est de rejouer la "
+            "bande publique des echanges contre un ordre simule "
+            "(subsidy/tape.py) pour chiffrer le cout de neutralisation, qui "
+            "est le seul terme manquant du net — et il se mesure sans "
+            "engager un centime."),
         next_action_why=(
-            "Ce n'est pas une limite de DONNEES : plus d'historique de funding "
-            "validerait le 33,3 sans l'elever, et la concession de 0,26 bps "
-            "est une propriete structurelle de la densite des carnets, mesuree "
-            "sur 29 038 rafales. Les sources d'economie qui restent exigent ce "
-            "que ce compte n'a pas — latence, information, ou une position du "
-            "cote de la venue — et non davantage de donnees."),
+            "Parce que le brut n'est pas un profit et que six inconnues "
+            "peuvent en retourner le signe (subsidy.economics.UNKNOWNS). La "
+            "plus lourde est le flux : la subvention s'encaisse sans frais, "
+            "mais NEUTRALISER un inventaire est une traversee, et le taker y "
+            "paie 4 a 7 % selon la categorie — zero sur le seul segment "
+            "geopolitique. Sur un binaire, YES + NO = 1,00 $ par "
+            "construction : le cout d'un remplissage se LIT au carnet au lieu "
+            "de s'estimer par un markout, ce qui rend le net calculable hors "
+            "capital. C'est la premiere fois dans ce depot que le terme "
+            "manquant est mesurable sans ordre reel."),
     )
     d.add(Metric("capital disponible", 1_000.0, "EUR", OBSERVED,
                  "mandat"))
@@ -357,6 +370,22 @@ def build() -> Dashboard:
     d.add(Metric("edge brut requis par aller-retour", None, "bps", UNKNOWN,
                  "conditions.py le mesure EN DIRECT : il vaut toujours plus "
                  "que le cout, quels que soient rotation et levier"))
+    d.add(Metric("pool de subvention publie (Polymarket)", 13_504.0,
+                 "USDC/jour", MEASURED,
+                 "subsidy/venue.py — 921 marches actifs publiant un pool en "
+                 "USDC, lu par marche et jamais suppose"))
+    d.add(Metric("subvention BRUTE captable par 1 000 EUR", 4.77, "%/jour",
+                 MEASURED,
+                 "scans/subsidy.py — formule publiee, 4 filtres declares "
+                 "d'avance ; BRUT : le cout de neutralisation manque"))
+    d.add(Metric("cout de neutralisation d'un remplissage", None, "USD",
+                 UNKNOWN,
+                 "subsidy/tape.py existe pour le mesurer sans capital ; tant "
+                 "qu'il manque, le net est None et non zero"))
+    d.add(Metric("arbitrage deterministe Polymarket (FERME)", 0.25, "%",
+                 MEASURED,
+                 "0 violation de YES+NO=1 sur 999 paires ; 2 groupes negRisk "
+                 "sur 52, meme evenement, 0,25 % rendu a la resolution"))
     return d
 
 
