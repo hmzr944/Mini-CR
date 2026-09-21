@@ -263,11 +263,34 @@ class TestTrialAccounting(unittest.TestCase):
         self.assertIsNone(expected_max_sharpe(1, 0.1))
 
     def test_deflation_impossible_without_trial_dispersion(self):
-        """Sans savoir combien les essais dispersent, on ne deflate PAS."""
-        d = deflated_sharpe([0.01] * 50, n_trials=500, trial_sharpe_std=None)
+        """Sans savoir combien les essais dispersent, on ne deflate PAS.
+
+        LE FIXTURE PRECEDENT NE TESTAIT PAS CELA. Il passait `[0.01] * 50`,
+        dont la variance est exactement nulle : `deflated_sharpe` sortait donc
+        des la garde `m["std"] <= 0` en renvoyant None, et le test echouait sur
+        `None.p_value` — de facon DETERMINISTE, sur toute plateforme. La
+        branche visee, celle qui refuse de deflater faute de dispersion des
+        essais, n'etait jamais atteinte. Il faut une serie a variance non
+        nulle pour l'exercer.
+        """
+        import random
+        rng = random.Random(11)
+        rets = [rng.gauss(0.01, 0.5) for _ in range(50)]
+        d = deflated_sharpe(rets, n_trials=500, trial_sharpe_std=None)
+        self.assertIsNotNone(d, "serie a variance non nulle : on doit obtenir "
+                                "un resultat, pas None")
         self.assertIsNone(d.p_value)
         self.assertFalse(d.significant)
         self.assertIn("IMPOSSIBLE", d.note)
+
+    def test_serie_degeneree_ne_produit_aucun_sharpe(self):
+        """Variance nulle : la reponse est None, et non un Sharpe infini.
+
+        C'est la garde que le fixture precedent declenchait par accident. On
+        la teste desormais pour elle-meme, au lieu de la subir.
+        """
+        self.assertIsNone(deflated_sharpe([0.01] * 50, n_trials=500,
+                                          trial_sharpe_std=0.05))
 
     def test_same_sharpe_is_less_significant_after_more_trials(self):
         import random

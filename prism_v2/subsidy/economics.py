@@ -102,6 +102,17 @@ def taker_fee_usd(price: float, shares: float,
         return None
     if not 0.0 <= price <= 1.0:
         raise ValueError("le prix d'un binaire vit dans [0, 1]")
+    if not 0.0 <= rate <= 1.0:
+        # UN TAUX N'EST PAS UN CHAMP BRUT. `maker_base_fee` vaut 1000 dans
+        # l'API du carnet ; passe ici tel quel, il produit un frais 25 000
+        # fois trop grand — et le resultat garde l'air d'une mesure : un cout
+        # de neutralisation de 1 400 $/jour sur 1 000 $ de capital, lu comme
+        # « la famille est tuee par son propre cout ». C'est arrive.
+        # Les taux de TAKER_FEE_RATES sont des FRACTIONS (0,04 = 4 %).
+        raise ValueError(
+            f"taux de frais {rate!r} hors de [0, 1] : un taux est une "
+            f"FRACTION, pas le champ brut d'une API. Convertis avant "
+            f"d'appeler (maker_base_fee=1000 signifie 0,10, pas 1000).")
     return shares * rate * price * (1.0 - price)
 
 
