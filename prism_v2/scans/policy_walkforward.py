@@ -34,7 +34,8 @@ from prism_v2.policy.engine import Market, build_samples, run_policy, split_inde
 from prism_v2.policy.state import FEATURES, StateBuilder, StateConfig, flow_median
 from prism_v2.policy.value import select_features
 
-SCRATCH = os.environ.get("PRISM_SCAN_DIR", "/tmp/prism_scans")
+from prism_v2.scans import scan_dir as _scan_dir
+SCRATCH = _scan_dir()
 TRAIN_FRACTION = 0.60
 CAPITAL_RESERVE_USD = 1_000.0
 CFG = StateConfig(short_rows=20, long_rows=200)

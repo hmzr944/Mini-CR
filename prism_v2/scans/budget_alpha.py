@@ -27,7 +27,8 @@ tient pas a la structure du mouvement.
 import json, math, os, statistics as st, time, urllib.request
 from collections import defaultdict
 
-SCAN = os.environ.get("PRISM_SCAN_DIR", "/tmp/prism_scans")
+from prism_v2.scans import scan_dir as _scan_dir
+SCAN = _scan_dir()
 FEES = {"OKX": 5.0, "MEXC": 2.0, "Bitget": 6.0, "Hyperliquid": 4.5}
 MIN_VOL = 1_000_000.0          # tradabilite : 1 M USD/jour minimum
 DUREES_H = [1, 2, 4, 8, 16, 32, 64, 128]

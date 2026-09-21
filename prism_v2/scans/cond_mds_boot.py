@@ -24,7 +24,8 @@ horizons dans cette representation.
 import json, math, os, random, statistics as st, time, urllib.request
 from collections import defaultdict
 
-SCAN = os.environ.get("PRISM_SCAN_DIR", "/tmp/prism_scans")
+from prism_v2.scans import scan_dir as _scan_dir
+SCAN = _scan_dir()
 FEES = {"OKX": 5.0, "MEXC": 2.0, "Bitget": 6.0}
 QS = [2, 4, 8, 16, 32]
 TRAIL, NB, BOOT = 24, 5, 400

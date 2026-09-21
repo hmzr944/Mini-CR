@@ -45,6 +45,28 @@ PAIR = "PAIRE"
 PORTFOLIO = "PORTEFEUILLE"
 _AGGREGATIONS = (PAIR, PORTFOLIO)
 
+#: CLASSE DE PREUVE d'un plafond. Meme denominateur, meme agregation, meme
+#: unite — et pourtant incomparables. Presque tous les plafonds de ce registre
+#: sont des bornes SUPERIEURES, et chacune l'est pour une raison differente.
+#: Les melanger produit la faute que ce module interdit deja pour les unites :
+#: afficher la borne superieure d'un mecanisme mort sous le titre
+#: « MEILLEURE ECONOMIE DEMONTREE ».
+#:
+#: La regle de classement est declaree ICI, avant tout chiffre, et EXECUTABLE
+#: exige les trois conditions a la fois :
+#:   1. remplissage CERTAIN (taker, ou remplissage observe) ;
+#:   2. couts au bareme REEL — ni frais ni latence mis a zero ;
+#:   3. la mesure survit au test statistique qu'elle s'etait elle-meme fixe.
+#: Si l'optimisme restant porte sur le REMPLISSAGE -> FILL_UNKNOWN.
+#: S'il porte sur le MECANISME, la MESURE ou une hypothese de COUT
+#: -> MECHANISM_UNPROVEN. Si l'on ne peut pas trancher -> UNQUALIFIED, qui
+#: n'est jamais promu en tete.
+EXECUTABLE = "EXECUTABLE"                   # les trois conditions ci-dessus
+FILL_UNKNOWN = "BORNE_FILL_INCONNU"         # optimisme = le remplissage passif
+MECHANISM_UNPROVEN = "BORNE_MECANISME_NON_ETABLI"  # optimisme = mecanisme/mesure/cout
+UNQUALIFIED = "BORNE_NON_QUALIFIEE"         # classe non tranchee — jamais en tete
+_EVIDENCE = (EXECUTABLE, FILL_UNKNOWN, MECHANISM_UNPROVEN, UNQUALIFIED)
+
 
 @dataclass(frozen=True)
 class Ceiling:
@@ -57,9 +79,13 @@ class Ceiling:
     method: str
     denominator: str = CAPITAL
     aggregation: str = PORTFOLIO
+    evidence: str = UNQUALIFIED
     note: str = ""
 
     def __post_init__(self) -> None:
+        if self.evidence not in _EVIDENCE:
+            raise ValueError(f"{self.family}: classe de preuve inconnue "
+                             f"{self.evidence!r}")
         if self.aggregation not in _AGGREGATIONS:
             raise ValueError(f"{self.family}: agregation inconnue "
                              f"{self.aggregation!r}")
@@ -106,16 +132,42 @@ class KillRegistry:
         return cls({c.family: c for c in items})
 
     def best_known(self) -> Optional[Ceiling]:
-        """Le plafond le plus HAUT jamais mesure, toutes familles confondues.
+        """La BORNE SUPERIEURE la plus haute jamais mesuree, toutes classes.
 
-        C'est la barre que tout nouveau candidat doit franchir pour etre le
-        meilleur resultat du projet — et non simplement « prometteur ».
+        C'est la barre a franchir pour qu'un candidat soit neuf, et rien de
+        plus. Elle melange volontairement les classes de preuve : pour TUER un
+        candidat par arithmetique, une borne superieure est le bon majorant,
+        quelle que soit sa classe. Pour ANNONCER ce que le projet a demontre,
+        elle ne l'est pas — voir `best_demonstrated`.
         """
         capitaux = [c for c in self.ceilings.values()
                     if c.denominator == CAPITAL]
         if not capitaux:
             return None
         return max(capitaux, key=lambda c: c.ceiling_bps_per_day)
+
+    def best_demonstrated(self) -> Optional[Ceiling]:
+        """La meilleure economie EXECUTABLE mesuree : remplissage certain.
+
+        POURQUOI CETTE METHODE EXISTE. `best_known` renvoyait « flux couvert,
+        duree optimale » a 33,30 bps/jour, et le tableau de bord l'affichait
+        sous le titre « MEILLEURE ECONOMIE DEMONTREE », a « un facteur 8,2 »
+        de l'objectif. Or ce plafond est la borne superieure d'un mecanisme
+        qui a atteint son PROPRE critere d'abandon declare d'avance
+        (alpha >= 0,45 ; mesure 0,493). Le titre promettait une economie ; le
+        nombre ne portait qu'une borne sur un mecanisme mort. C'est la faute
+        que le mandat nomme : « ne presente pas un edge brut comme un
+        profit ». Le denominateur et l'agregation etaient types ; la classe de
+        preuve ne l'etait pas, et c'est par la que la faute est passee.
+
+        Renvoie None quand aucun plafond EXECUTABLE n'existe : « inconnu » est
+        une reponse, pas zero.
+        """
+        exe = [c for c in self.ceilings.values()
+               if c.denominator == CAPITAL and c.evidence == EXECUTABLE]
+        if not exe:
+            return None
+        return max(exe, key=lambda c: c.ceiling_bps_per_day)
 
     def screen(self, candidate_bps_per_day: float, threshold_bps_per_day: float,
                denominator: str = CAPITAL) -> Dict[str, object]:
@@ -174,21 +226,40 @@ class KillRegistry:
 
     def render(self, threshold_bps_per_day: float) -> str:
         lines = [f"{'famille':<42}{'plafond bps/j':>15}{'sur':>10}"
-                 f"{'agregation':>14}{'x objectif':>12}{'n':>9}   motif",
-                 "-" * 118]
+                 f"{'agregation':>14}{'preuve':>26}{'x objectif':>12}"
+                 f"{'n':>9}   motif",
+                 "-" * 144]
         for c in sorted(self.ceilings.values(),
                         key=lambda x: -x.ceiling_bps_per_day):
             ratio = (f"{c.ceiling_bps_per_day/threshold_bps_per_day:>12.4f}"
                      if c.denominator == CAPITAL else f"{'—':>12}")
             lines.append(f"{c.family:<42}{c.ceiling_bps_per_day:>15.2f}"
-                         f"{c.denominator:>10}{c.aggregation:>14}{ratio}"
+                         f"{c.denominator:>10}{c.aggregation:>14}"
+                         f"{c.evidence:>26}{ratio}"
                          f"{c.n_observations:>9,}   {c.reason}")
         b = self.best_known()
         if b:
             lines.append("")
-            lines.append(f"meilleur plafond jamais mesure : {b.family} a "
-                         f"{b.ceiling_bps_per_day:.2f} bps/jour de capital")
-            lines.append(f"objectif : {threshold_bps_per_day:.2f} bps/jour  -> "
-                         f" il manque un facteur "
-                         f"{threshold_bps_per_day/b.ceiling_bps_per_day:,.1f}")
+            lines.append(f"borne superieure la plus haute ({b.evidence}) : "
+                         f"{b.family} a {b.ceiling_bps_per_day:.2f} bps/jour "
+                         f"de capital")
+            lines.append("  -> une borne, pas une economie : elle sert a TUER "
+                         "un candidat, pas a mesurer le projet.")
+        d = self.best_demonstrated()
+        lines.append("")
+        if d is None:
+            lines.append("MEILLEURE ECONOMIE EXECUTABLE DEMONTREE : AUCUNE. "
+                         "Aucun plafond de classe EXECUTABLE n'est enregistre.")
+        else:
+            lines.append(f"MEILLEURE ECONOMIE EXECUTABLE DEMONTREE : "
+                         f"{d.family} a {d.ceiling_bps_per_day:.2f} bps/jour "
+                         f"de capital")
+            if d.ceiling_bps_per_day > 0:
+                lines.append(f"  objectif : {threshold_bps_per_day:.2f} bps/jour"
+                             f"  ->  il manque un facteur "
+                             f"{threshold_bps_per_day/d.ceiling_bps_per_day:,.1f}")
+            else:
+                lines.append(f"  objectif : {threshold_bps_per_day:.2f} bps/jour"
+                             f"  ->  AUCUN facteur ne comble un ecart depuis "
+                             f"zero ou moins.")
         return "\n".join(lines)

@@ -101,6 +101,14 @@ class Dashboard:
     metrics: List[Metric] = field(default_factory=list)
     best_economy_bps_per_day: Optional[float] = None
     best_economy_label: str = ""
+    #: BORNE SUPERIEURE la plus haute du registre, toutes classes de preuve
+    #: confondues. Elle est affichee SEPAREMENT et jamais a la place de
+    #: l'economie demontree : le tableau de bord a longtemps titre
+    #: « MEILLEURE ECONOMIE DEMONTREE 33,30 bps/jour » alors que ce nombre
+    #: etait la borne d'un mecanisme ayant atteint son propre critere
+    #: d'abandon. Deux nombres, deux lignes, deux titres.
+    upper_bound_bps_per_day: Optional[float] = None
+    upper_bound_label: str = ""
     bottleneck: str = ""
     next_action: str = ""
     next_action_why: str = ""
@@ -154,20 +162,31 @@ class Dashboard:
         for m in self.metrics:
             lines.append(m.render())
         lines.append("-" * 78)
+        if self.upper_bound_bps_per_day is not None:
+            lines.append(f"BORNE SUPERIEURE LA PLUS HAUTE     "
+                         f"{self.upper_bound_bps_per_day:,.2f} bps/jour"
+                         f"   ({self.upper_bound_label})")
+            lines.append("  ce n'est PAS une economie : une borne sert a tuer "
+                         "un candidat, pas a mesurer le projet.")
         if self.best_economy_bps_per_day is None:
-            lines.append("MEILLEURE ECONOMIE DEMONTREE       INCONNU")
+            lines.append("ECONOMIE EXECUTABLE DEMONTREE      INCONNU")
         else:
             d = self.distance_to_objective()
             e = self.eur_per_day_at_best()
-            lines.append(f"MEILLEURE ECONOMIE DEMONTREE       "
+            lines.append(f"ECONOMIE EXECUTABLE DEMONTREE      "
                          f"{self.best_economy_bps_per_day:,.2f} bps/jour"
                          f"   ({self.best_economy_label})")
             lines.append(f"  soit, sur {o.capital_eur:,.0f} EUR            "
                          f"{e:,.2f} EUR/jour  contre {o.target_eur_per_day:,.0f} vises")
-            lines.append(f"  DISTANCE A L'OBJECTIF             {d:.3f}x"
-                         f"   (il manque un facteur {1.0/d:,.1f})"
-                         if d and d > 0 else
-                         "  DISTANCE A L'OBJECTIF             economie negative")
+            if d and d > 0:
+                lines.append(f"  DISTANCE A L'OBJECTIF             {d:.3f}x"
+                             f"   (il manque un facteur {1.0/d:,.1f})")
+            elif d == 0:
+                lines.append("  DISTANCE A L'OBJECTIF             AUCUN "
+                             "facteur multiplicatif ne part de zero")
+            else:
+                lines.append("  DISTANCE A L'OBJECTIF             economie "
+                             "negative")
         lines.append("")
         lines.append(f"GOULOT D'ETRANGLEMENT : {self.bottleneck or 'INCONNU'}")
         lines.append(f"PROCHAINE ACTION      : {self.next_action or 'INCONNU'}")

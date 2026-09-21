@@ -24,7 +24,8 @@ from bisect import bisect_left, bisect_right
 from prism_v2.long_test import t_test_one_sided
 
 import os as _os
-SCRATCH = _os.environ.get("PRISM_SCAN_DIR", "/tmp/prism_scans")
+from prism_v2.scans import scan_dir as _scan_dir
+SCRATCH = _scan_dir()
 D = pickle.load(open(f"{SCRATCH}/tape.pkl", "rb"))
 INST, H, MAKER = "BCH-USDT-SWAP", 300, 2.0
 q, tr = D["quotes"][INST], D["trades"][INST]

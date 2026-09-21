@@ -28,7 +28,8 @@ import json, math, os, statistics as st, time, urllib.request
 from collections import defaultdict
 from prism_v2.long_test import t_test_one_sided, benjamini_hochberg
 
-SCAN = os.environ.get("PRISM_SCAN_DIR", "/tmp/prism_scans")
+from prism_v2.scans import scan_dir as _scan_dir
+SCAN = _scan_dir()
 FEES = {"OKX": 5.0, "MEXC": 2.0, "Bitget": 6.0}
 HS = [1, 2, 4, 8, 16]
 TRAIL, NB = 24, 5

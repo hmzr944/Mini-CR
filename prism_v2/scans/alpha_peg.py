@@ -22,7 +22,8 @@ avec leurs deux jambes. 3,75 fois plus que la mesure sur correlation.
 import json, math, os, statistics as st
 from pathlib import Path
 
-SCAN = os.environ.get("PRISM_SCAN_DIR", "/tmp/prism_scans")
+from prism_v2.scans import scan_dir as _scan_dir
+SCAN = _scan_dir()
 RAW = json.load(open(Path("prism_v2/data/candles_1h.json")))["data"]
 BASES = sorted({k.split("-")[0] for k in RAW if k.endswith("-USD-SWAP")}
                & {k.split("-")[0] for k in RAW if k.endswith("-USDT-SWAP")})

@@ -24,7 +24,8 @@ n'entre dans la definition de l'etat.
 import json, math, os, statistics as st, time, urllib.request
 from collections import defaultdict
 
-SCAN = os.environ.get("PRISM_SCAN_DIR", "/tmp/prism_scans")
+from prism_v2.scans import scan_dir as _scan_dir
+SCAN = _scan_dir()
 os.makedirs(SCAN, exist_ok=True)
 FEES = {"OKX": 5.0, "MEXC": 2.0, "Bitget": 6.0}
 HOR = [1, 2, 4, 8, 16, 32, 64]

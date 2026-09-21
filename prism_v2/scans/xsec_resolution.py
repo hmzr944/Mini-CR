@@ -31,7 +31,8 @@ acceptable d'une collecte : elle nomme la decision qu'elle changerait.
 """
 import json, os
 
-SCRATCH = os.environ.get("PRISM_SCAN_DIR", "/tmp/prism_scans")
+from prism_v2.scans import scan_dir as _scan_dir
+SCRATCH = _scan_dir()
 #: Cout plancher d'un aller-retour, en bps : frais maker NUL (bareme public
 #: MEXC verifie) plus une sortie en traversee chez OKX. Rien ne descend plus
 #: bas, donc c'est le seuil le plus favorable qui puisse exister.

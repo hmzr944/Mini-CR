@@ -18,7 +18,8 @@ c'est exactement la que les taux sont extremes.
 import json, os as _os, time, statistics as st
 import urllib.request
 
-_SCAN = _os.environ.get('PRISM_SCAN_DIR', '/tmp/prism_scans')
+from prism_v2.scans import scan_dir as _scan_dir
+_SCAN = _scan_dir()
 _os.makedirs(_SCAN, exist_ok=True)
 
 from prism_v2.funding_feed import _http_json, OKX_BASE

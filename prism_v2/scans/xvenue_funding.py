@@ -16,7 +16,8 @@ Ici chaque periode porte sa propre duree, mesuree sur l'ecart avec la periode
 precedente.
 """
 import json, math, os as _os, time, statistics as st, urllib.request
-_SCAN_DIR = _os.environ.get('PRISM_SCAN_DIR', '/tmp/prism_scans')
+from prism_v2.scans import scan_dir as _scan_dir
+_SCAN_DIR = _scan_dir()
 _os.makedirs(_SCAN_DIR, exist_ok=True)
 
 from prism_v2.funding_feed import _http_json, OKX_BASE
