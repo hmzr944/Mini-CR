@@ -151,5 +151,29 @@ class TestRejeu(unittest.TestCase):
         self.assertEqual(DEFAULT_POLL_S, 5.0)
 
 
+
+class TestCouvertureDeBande(unittest.TestCase):
+    """La garde doit alarmer sur une bande ECHAPPEE, et seulement sur elle."""
+
+    def _t(self, ts):
+        return Trade(ts, 100.0, 1.0, taker_is_buy=True)
+
+    def test_une_bande_echappee_par_la_GAUCHE_est_detectee(self):
+        """Le defaut reel : /trades plafonne a 1 000 echanges, les plus
+        anciens sortent, et le rejeu lit « 0 echange » comme un marche mort."""
+        from prism_v2.backpack.replay import tape_covers_window
+        self.assertFalse(tape_covers_window([self._t(50.0)], (0.0, 100.0)))
+
+    def test_une_bande_finissant_AVANT_le_dernier_carnet_reste_valide(self):
+        """Un marche calme n'a simplement pas traite pendant quelques
+        secondes. Alarmer ici rendait NON sur six marches sains."""
+        from prism_v2.backpack.replay import tape_covers_window
+        self.assertTrue(tape_covers_window([self._t(-10.0), self._t(90.0)],
+                                           (0.0, 100.0)))
+
+    def test_une_bande_vide_n_est_jamais_une_couverture(self):
+        from prism_v2.backpack.replay import tape_covers_window
+        self.assertFalse(tape_covers_window([], (0.0, 100.0)))
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

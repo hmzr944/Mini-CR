@@ -165,16 +165,28 @@ def load_tape(path: Path) -> Dict[str, List[Trade]]:
 
 def tape_covers_window(trades: Sequence[Trade],
                        window: Tuple[float, float]) -> bool:
-    """La bande couvre-t-elle la fenetre de carnet, ou s'est-elle echappee ?
+    """La bande a-t-elle ECHAPPE la fenetre, ou la couvre-t-elle encore ?
 
     Le controle que le premier rejeu n'avait pas : sans lui, une bande trop
     courte rend « 0 echange » et se lit comme un marche mort au lieu d'un
     defaut de capture.
+
+    SEUL LE BORD GAUCHE EST UN DEFAUT. `/trades` plafonne a 1 000 echanges :
+    sur un marche actif, les plus anciens sortent de la fenetre et c'est
+    exactement la faute qui avait perdu BTC, ETH et SOL. Le bord DROIT, lui,
+    ne prouve rien — une bande dont le dernier echange precede le dernier
+    instantane decrit un marche qui n'a simplement pas traite pendant
+    quelques secondes, ce qui est le cas normal d'un marche calme.
+
+    La premiere version exigeait les deux bords et rendait NON sur les six
+    marches d'une collecte dont la bande avait pourtant ete capturee par le
+    collecteur lui-meme. Une garde qui alarme sur du sain est une garde qu'on
+    apprend a ignorer : elle est donc resserree sur ce qu'elle sait detecter.
     """
     if not trades:
         return False
-    t0, t1 = window
-    return min(t.ts for t in trades) <= t0 and max(t.ts for t in trades) >= t1
+    t0, _ = window
+    return min(t.ts for t in trades) <= t0
 
 
 @dataclass
