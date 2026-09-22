@@ -141,6 +141,42 @@ def load_books(path: Path, poll_s: float = DEFAULT_POLL_S
     return {k: BookHistory(v, poll_s) for k, v in by_sym.items()}
 
 
+def load_tape(path: Path) -> Dict[str, List[Trade]]:
+    """Charge une bande CAPTUREE par le collecteur, par symbole.
+
+    Preferer ce fichier a un appel live : `/trades` plafonne a 1 000 echanges
+    et la bande d'un marche actif s'echappe de la fenetre en moins d'une heure.
+    Une ligne tronquee est sautee, jamais reparee.
+    """
+    by_sym: Dict[str, List[Trade]] = {}
+    with path.open() as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                d = json.loads(line)
+                t = Trade(d["ts"], d["price"], d["size"], d["taker_is_buy"])
+            except Exception:
+                continue
+            by_sym.setdefault(d["sym"], []).append(t)
+    return by_sym
+
+
+def tape_covers_window(trades: Sequence[Trade],
+                       window: Tuple[float, float]) -> bool:
+    """La bande couvre-t-elle la fenetre de carnet, ou s'est-elle echappee ?
+
+    Le controle que le premier rejeu n'avait pas : sans lui, une bande trop
+    courte rend « 0 echange » et se lit comme un marche mort au lieu d'un
+    defaut de capture.
+    """
+    if not trades:
+        return False
+    t0, t1 = window
+    return min(t.ts for t in trades) <= t0 and max(t.ts for t in trades) >= t1
+
+
 @dataclass
 class ReplayResult:
     """Ce que le carnet enregistre dit d'un marche, et ce qu'il laisse ouvert."""
@@ -233,22 +269,30 @@ def _fmt(v: Optional[float], width: int = 10, places: int = 2) -> str:
 def main(argv: Optional[Sequence[str]] = None) -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--books", type=Path, required=True)
+    p.add_argument("--tape", type=Path, default=None,
+                   help="bande CAPTUREE par le collecteur ; sinon appel live "
+                        "(qui perd les marches actifs, voir capture_tape)")
     p.add_argument("--poll-s", type=float, default=DEFAULT_POLL_S)
     p.add_argument("--horizon-s", type=float, default=60.0)
     a = p.parse_args(argv)
 
     books = load_books(a.books, a.poll_s)
+    tapes = load_tape(a.tape) if a.tape else None
     print(f"symboles avec carnet enregistre : {len(books)}")
+    print(f"bande : {'CAPTUREE ' + str(a.tape) if tapes else 'appel live'}")
     print(f"horizon de markout : {a.horizon_s:.0f} s   "
           f"seuil de mediane : {MIN_FILLS_FOR_MEDIAN} fills")
     print()
     head = (f"{'marche':<20}{'snaps':>7}{'min':>6}{'spread':>9}{'ech.':>7}"
-            f"{'demi-spr':>10}{'markout':>10}{'equilibre':>11}{'N':>6}{'file':>7}")
+            f"{'demi-spr':>10}{'markout':>10}{'equilibre':>11}{'N':>6}{'file':>7}"
+            f"{'couvre?':>8}")
     print(head)
     print("-" * len(head))
 
     for sym in sorted(books):
-        tape = fetch_tape(sym)
+        tape = tapes.get(sym, []) if tapes is not None else fetch_tape(sym)
+        win = books[sym].window()
+        couvre = tape_covers_window(tape, win) if win else False
         r = replay(sym, books[sym], tape, horizons_s=(a.horizon_s,))
         n = len(r.markouts_bps.get(a.horizon_s, []))
         print(f"{sym:<20}{r.snapshots:>7}"
@@ -257,7 +301,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
               f"{_fmt(r.median_half_spread_bps())}"
               f"{_fmt(r.median_markout_bps(a.horizon_s))}"
               f"{_fmt(r.breakeven_fee_bps(a.horizon_s), 11)}{n:>6}"
-              f"{'-' if r.queue_aware_fills is None else r.queue_aware_fills:>7}")
+              f"{'-' if r.queue_aware_fills is None else r.queue_aware_fills:>7}"
+              f"{'oui' if couvre else 'NON':>8}")
 
     print()
     print("spread    : mediane du spread REEL sur la fenetre (carnet lu).")
@@ -266,6 +311,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     print("            adverse selection.")
     print("equilibre : frais maker supporte. Negatif = il faut un REBATE.")
     print("file      : fills d'un ordre pose DERRIERE la file reelle.")
+    print("couvre?   : la bande couvre-t-elle toute la fenetre de carnet ?")
+    print("            NON = defaut de CAPTURE, pas un marche sans echange.")
     return 0
 
 

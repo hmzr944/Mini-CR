@@ -101,6 +101,39 @@ def collect(symbols: Sequence[str], out_path: Path, duration_s: float,
     return written
 
 
+def capture_tape(symbols: Sequence[str], out_path: Path) -> int:
+    """Capture la bande A LA FIN de la collecte. Rend le nombre d'echanges.
+
+    POURQUOI CETTE FONCTION EXISTE. Le premier rejeu a perdu BTC, ETH et SOL —
+    les trois marches les plus liquides — en rendant « 0 echange dans la
+    fenetre ». Ce n'etait pas un fait de marche : `/trades` plafonne a 1 000
+    echanges, soit 41 min d'historique sur BTC, et le rejeu a tourne 105 min
+    apres la fin de la collecte. La bande avait defile au-dela de la fenetre.
+
+    Plus le marche est ACTIF, plus vite sa bande s'echappe : le defaut frappe
+    donc exactement les marches qu'on veut le plus mesurer. Le capturer depuis
+    le collecteur, et non depuis le rejeu, rend la faute impossible a
+    reproduire — le rejeu peut alors tourner n'importe quand.
+    """
+    from prism_v2.backpack.venue import fetch_tape
+
+    n = 0
+    with out_path.open("a") as fh:
+        for sym in symbols:
+            try:
+                trades = fetch_tape(sym)
+            except Exception:
+                continue
+            for t in trades:
+                fh.write(json.dumps({"ts": t.ts, "sym": sym, "price": t.price,
+                                     "size": t.size,
+                                     "taker_is_buy": t.taker_is_buy}) + "\n")
+                n += 1
+            fh.flush()
+            time.sleep(INTER_REQUEST_SLEEP_S)
+    return n
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--out", type=Path, required=True,
@@ -125,6 +158,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print(f"  {s}", flush=True)
     n = collect(symbols, a.out, a.minutes * 60.0, a.poll_s)
     print(f"instantanes ecrits : {n}", flush=True)
+
+    tape_path = a.out.with_suffix(".tape.jsonl")
+    m = capture_tape(symbols, tape_path)
+    print(f"echanges captures  : {m} -> {tape_path}", flush=True)
     return 0
 
 
