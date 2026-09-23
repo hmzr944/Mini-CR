@@ -78,10 +78,31 @@ TEMOIN_ECART_MIN_S = 120.0
 #: temoin unique herite de la volatilite de son propre instant.
 TEMOINS_PAR_EPISODE = 3
 
-#: Familles OKX suivies, appariees a leur marche Backpack.
-PAIRES = [("BTC-USDT", "BTC_USDC_PERP"), ("ETH-USDT", "ETH_USDC_PERP"),
-          ("SOL-USDT", "SOL_USDC_PERP"), ("DOGE-USDT", "DOGE_USDC_PERP"),
-          ("XRP-USDT", "XRP_USDC_PERP"), ("BNB-USDT", "BNB_USDC_PERP")]
+#: UNIVERS GELE LE 23 SEPTEMBRE 2026, AVANT TOUTE LECTURE DE RESULTAT.
+#:
+#: DERIVE, jamais ecrit a la main : intersection des familles OKX SWAP -USDT
+#: et des perpetuels Backpack, triee par le volume 24 h **en USD de
+#: Backpack** — la venue ou l'on traite, et la seule unite homogene.
+#:
+#: UN PREMIER TRI ETAIT FAUX ET A ETE JETE. Il classait sur `volCcy24h` d'OKX,
+#: libelle dans la DEVISE DU CONTRAT : il comparait 23 milliards de PUMP a un
+#: volume exprime en BTC, et sortait un univers d'ou BTC, ETH et SOL etaient
+#: absents. Meme faute d'unite que melanger CAPITAL et NOTIONNEL, que le
+#: registre interdit deja par typage.
+#:
+#: Les 20 retenues couvrent 93 % du volume perpetuel de Backpack.
+PAIRES = [
+    ("BTC-USDT", "BTC_USDC_PERP"), ("SOL-USDT", "SOL_USDC_PERP"),
+    ("ETH-USDT", "ETH_USDC_PERP"), ("HYPE-USDT", "HYPE_USDC_PERP"),
+    ("UNI-USDT", "UNI_USDC_PERP"), ("ZEC-USDT", "ZEC_USDC_PERP"),
+    ("XRP-USDT", "XRP_USDC_PERP"), ("ARB-USDT", "ARB_USDC_PERP"),
+    ("NEAR-USDT", "NEAR_USDC_PERP"), ("BNB-USDT", "BNB_USDC_PERP"),
+    ("SUI-USDT", "SUI_USDC_PERP"), ("PENGU-USDT", "PENGU_USDC_PERP"),
+    ("AAVE-USDT", "AAVE_USDC_PERP"), ("ASTER-USDT", "ASTER_USDC_PERP"),
+    ("SEI-USDT", "SEI_USDC_PERP"), ("AVAX-USDT", "AVAX_USDC_PERP"),
+    ("LTC-USDT", "LTC_USDC_PERP"), ("DOGE-USDT", "DOGE_USDC_PERP"),
+    ("TAO-USDT", "TAO_USDC_PERP"), ("ENA-USDT", "ENA_USDC_PERP"),
+]
 
 
 def _get(url: str, tries: int = 3):
