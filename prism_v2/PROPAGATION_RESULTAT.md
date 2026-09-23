@@ -119,3 +119,96 @@ Réouverture conditionnée à un élément nouveau : un couple de venues où la
 latence est structurellement plus faible, un flux d'événements sur la venue
 tradable elle-même, ou un type d'événement à horodatage connu d'avance — où
 la vitesse ne décide plus.
+
+---
+
+# Vérifications post-lecture demandées en revue
+
+Trois contrôles exécutés APRÈS le résultat, à la demande de la revue. Aucun
+seuil déplacé ; ils ajoutent de l'incertitude, ils n'en retirent pas.
+
+## A. Taille effective de l'échantillon
+
+Les 56 épisodes ne sont pas 56 observations indépendantes : ils se répartissent
+sur **19 instruments**, et le plus représenté (PENGU) en porte **16 %**.
+
+Bootstrap **par bloc** — on ré-échantillonne des instruments ENTIERS, pas des
+épisodes isolés, pour que la corrélation intra-instrument soit conservée :
+
+    mediane ponctuelle          -9,20 bps
+    IC 95 % bootstrap par bloc  [-14,30 ; -4,52]
+
+**L'intervalle exclut zéro.** L'effet survit à la prise en compte du
+regroupement par instrument. C'est un renforcement du résultat, pas un
+affaiblissement — mais il porte sur un excès NÉGATIF, donc il confirme que la
+voie est défavorable, pas qu'elle est exploitable.
+
+## B. Convention de coût — vérifiée dans le code
+
+| | |
+|---|---|
+| `FRAIS_AR_BPS = 10` | 2 × 5 bps taker Tier 1 → **aller-retour**. Correct. |
+| convention de spread | `mouvement_bps` mesure **mid → mid** ; un taker paie +½ spread à l'entrée et −½ à la sortie = **un spread plein**. Soustraire un spread entier est la bonne convention. |
+| spread entrée vs sortie | 1,01 bps contre 0,99 — écart **−0,01 bps**, négligeable |
+| âge du carnet à l'entrée | médiane **103 ms**, q95 **572 ms** |
+
+L'âge médian de 103 ms est bien inférieur au plus court délai testé (500 ms) :
+le prix d'entrée est réellement disponible au moment simulé. Les rares points
+dépassant le plafond de fraîcheur de 2 000 ms sont **rejetés par l'analyse**
+(`Prix.mid` rend None) ; ils apparaissaient dans le diagnostic brut parce que
+celui-ci lisait l'index sans le filtre.
+
+## C. Le seuil de 390 bps — ma comparaison était bancale
+
+La revue a raison, et la faute est de moi. Le seuil de 390 bps est défini sur
+le **q95 du net par épisode**. Je le comparais à une **médiane**. Deux
+statistiques différentes.
+
+Sur la même base :
+
+| délai | net médian | **net q95** | seuil | écart |
+|---|---|---|---|---|
+| 0,5 s | −16,94 | **+2,03** | 390 | **192×** |
+| 1,0 s | −19,96 | **+6,91** | 390 | 56× |
+| 2,0 s | −18,45 | **+9,38** | 390 | 42× |
+| 5,0 s | −14,33 | **+11,12** | 390 | 35× |
+
+Le q95 net est **positif**, contrairement à ce que j'aurais parié : le meilleur
+vingtième des épisodes couvre tout juste les coûts. Mais il reste **35 à 192
+fois** sous le seuil économique.
+
+**« Deux ordres de grandeur » était une formule appliquée à la mauvaise
+statistique.** Le chiffre correct est 1,5 à 2,3 ordres de grandeur, obtenu sur
+la bonne base. La conclusion tient ; la façon dont je l'avais atteinte était
+fautive.
+
+### Et une faute de méthode que je dois signaler
+
+Le script de vérification imprimait la phrase « le q95 NET est négatif ou
+quasi nul » — **une conclusion écrite avant d'avoir vu les nombres**, et
+démentie par eux. Aucun résultat n'en dépend, mais c'est exactement le mode de
+défaillance que ce dépôt existe pour attraper, commis dans l'outil chargé de
+l'attraper. Consigné.
+
+## Reformulation du verdict
+
+À la place de « le test tranche » :
+
+> Les observations de cette fenêtre rejettent l'intérêt économique apparent de
+> la voie OKX → Backpack EU aux délais de 0,5 à 5 s, dans ces conditions de
+> coût et sur cette période. Elles ne ferment pas les stratégies fondées sur
+> les liquidations en général.
+
+## Règle de réouverture, resserrée
+
+Un nouvel échantillon plus favorable ne suffit pas. Il faut un **changement
+vérifiable du mécanisme** :
+
+1. **Flux natif sur la venue tradable** — l'événement observé là où l'exécution
+   a lieu ;
+2. **Latence structurellement différente** — mesurée, pas espérée ;
+3. **Événement à horodatage connu d'avance** — le temps de réaction cesse
+   d'être l'avantage recherché, sans supposer l'événement sans risque.
+
+Une nouvelle hypothèse exige un **nouveau test préenregistré**. Elle ne sert
+pas à réinterpréter rétroactivement un résultat négatif.
