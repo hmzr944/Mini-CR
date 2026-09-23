@@ -35,7 +35,8 @@ from prism_v2.funding_feed import OKX_BASE, _http_json
 from prism_v2.instruments import parse_okx_instrument
 from prism_v2.margin import load_schedules
 
-SCRATCH = os.environ.get("PRISM_SCAN_DIR", "/tmp/prism_scans")
+from prism_v2.scans import scan_dir as _scan_dir
+SCRATCH = _scan_dir()
 
 #: Differentiel de funding inverse - lineaire, moyenne sur 92 jours, en bps
 #: par jour de notionnel. Mesure par prism_v2/scans/funding_pairs (crible

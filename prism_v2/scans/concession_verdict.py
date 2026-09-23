@@ -14,7 +14,8 @@ import math, os, pickle, statistics as st
 from bisect import bisect_right
 from prism_v2.long_test import t_test_one_sided, benjamini_hochberg
 
-SCAN = os.environ.get("PRISM_SCAN_DIR", "/tmp/prism_scans")
+from prism_v2.scans import scan_dir as _scan_dir
+SCAN = _scan_dir()
 D = pickle.load(open(f"{SCAN}/concession2.pkl", "rb"))
 Q, B = D["quotes"], D["bursts"]
 MAKER, HOR = 2.0, [1_000, 5_000, 30_000, 300_000]

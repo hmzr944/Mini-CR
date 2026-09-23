@@ -36,7 +36,8 @@ from prism_v2.instruments import parse_okx_instrument
 from prism_v2.contracts import usd_notional
 from prism_v2.long_test import t_test_one_sided, benjamini_hochberg
 
-SCAN = os.environ.get("PRISM_SCAN_DIR", "/tmp/prism_scans")
+from prism_v2.scans import scan_dir as _scan_dir
+SCAN = _scan_dir()
 os.makedirs(SCAN, exist_ok=True)
 MAKER_BPS = 2.0
 HORIZONS_MS = [1_000, 5_000, 30_000, 300_000]

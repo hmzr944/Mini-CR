@@ -247,7 +247,7 @@ class Bot:
         net = ev.expected_net_capture_bps
         if net is not None and (rep.best_net_bps is None or net > rep.best_net_bps):
             rep.best_net_bps = net
-            rep.best_candidate = f"{obs.symbol} ({cand.observed_state['diff_apr']*100:+.0f} %/an)"
+            rep.best_candidate = _candidate_label(obs.symbol, cand)
 
         if ev.status is CaptureStatus.UNRESOLVED:
             rep.n_unresolved += 1
@@ -281,6 +281,30 @@ class Bot:
             "rejected": fill.is_rejected,
             "reason": fill.reject_reason,
         })
+
+
+def _candidate_label(symbol: str, cand: Candidate) -> str:
+    """Etiquette lisible d'une candidate, AGNOSTIQUE a la famille.
+
+    POURQUOI CETTE FONCTION EXISTE. Le code de criblage est generique — il
+    accepte tout detecteur enregistre — mais il lisait `observed_state['diff_apr']`
+    en dur pour nommer la meilleure candidate. Ce champ n'existe QUE dans la
+    famille funding. Des qu'une candidate d'une autre famille (flux force,
+    liquidation) devenait la meilleure, la lecture levait KeyError, l'exception
+    remontait au `try` du cycle, et les candidates SUIVANTES de la meme
+    observation etaient perdues — un cycle « propre » a zero acceptation,
+    strictement indiscernable d'un marche sans opportunite. C'est exactement le
+    mode d'echec que ce bot dit refuser (voir _process). Un detecteur
+    supplementaire, precisement ce qu'exige une detection large, suffisait a le
+    declencher.
+
+    L'etiquette garde la finesse de la famille funding quand elle est
+    disponible, et retombe sur le type d'opportunite sinon.
+    """
+    diff = cand.observed_state.get("diff_apr")
+    if isinstance(diff, (int, float)):
+        return f"{symbol} ({diff * 100:+.0f} %/an)"
+    return f"{symbol} ({cand.opportunity_type})"
 
 
 # ---- rendu ---------------------------------------------------------------

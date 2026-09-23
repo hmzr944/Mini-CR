@@ -7,11 +7,13 @@ qui n'a pas ete mesure est INCONNU et s'affiche INCONNU.
 """
 from prism_v2.dashboard import (DERIVED, MEASURED, OBSERVED, UNKNOWN,
                                 Dashboard, Metric, Objective)
-from prism_v2.kill_registry import (CAPITAL, COST_DOMINATES, PAIR,
+from prism_v2.kill_registry import (CAPITAL, COST_DOMINATES, EXECUTABLE,
+                                    FILL_UNKNOWN, MECHANISM_UNPROVEN, PAIR,
                                     NOTIONAL as _N,
                                     MEASUREMENT_INVALID, NOTIONAL,
                                     NOT_HEDGEABLE, NOT_PERSISTENT,
-                                    NO_MAGNITUDE, Ceiling, KillRegistry)
+                                    NO_MAGNITUDE, UNQUALIFIED,
+                                    Ceiling, KillRegistry)
 from prism_v2.modes import SystemMode
 
 OBJECTIF = Objective(capital_eur=1_000.0, target_eur_per_day=20.0,
@@ -61,7 +63,8 @@ PLAFONDS = [
             NO_MAGNITUDE, 26_512,
             "cond_final_eco.py — rho = -0,010 apres filtre des prix perimes ; "
             "0/25 survivants BH",
-            denominator=_N, aggregation=PAIR),
+            denominator=_N, aggregation=PAIR,
+            evidence=EXECUTABLE),  # test economique direct et causal, couts reels, 0/25 BH
     # UNIVERS. Le budget economique d'un instrument — mouvement quotidien
     # rapporte au cout d'un aller-retour — a ete mesure sur 3 419 instruments
     # de quatre venues joignables. PRISM n'avait jamais regarde que 21
@@ -76,7 +79,8 @@ PLAFONDS = [
             NO_MAGNITUDE, 3_419,
             "univers_budget.py + budget_alpha.py — alpha 0,545 contre 0,544 "
             "sur le temoin, marche aleatoire = 0,500",
-            denominator=_N, aggregation=PAIR),
+            denominator=_N, aggregation=PAIR,
+            evidence=MECHANISM_UNPROVEN),  # exposant de deplacement, aucun PnL simule
     # FORME « CONTRAINTE » (directive finale, section 7) : quelqu'un DOIT agir
     # et paie une concession pour le droit d'agir maintenant ; le cote passif
     # la recoit. Mesure sur 29 038 rafales agressives reconstruites, carnet
@@ -92,7 +96,8 @@ PLAFONDS = [
             COST_DOMINATES, 29_038,
             "concession_verdict.py — concession 0,26 bps contre 1,54 de "
             "selection adverse ; l'urgence ne paie pas sur ces carnets",
-            denominator=_N, aggregation=PAIR),
+            denominator=_N, aggregation=PAIR,
+            evidence=FILL_UNKNOWN),  # le gain suppose un remplissage du cote passif
     # RESET DE REPRESENTATION : panier NON COUVERT, risque dilue
     # transversalement, flux = NIVEAU du funding et non differentiel, 2
     # traversees par nom au lieu de 4. Le funding capte (1,51 a 4,06 bps/jour)
@@ -103,43 +108,54 @@ PLAFONDS = [
             COST_DOMINATES, 98,
             "basket_reset.py — bruit de prix ~45 bps/jour contre 1,5 de "
             "funding, rapport 1:30 ; l'univers accessible est un seul facteur",
-            denominator=_N, aggregation=PAIR),
+            denominator=_N, aggregation=PAIR,
+            evidence=MECHANISM_UNPROVEN),  # 0/16 survivants BH
     # Mesure PAR PAIRE (alpha propre, flux causal propre) : alpha varie de
     # 0,160 a 0,727 selon la paire — le pooling cachait bien de la structure,
     # mais AUCUNE paire ne combine gros flux et alpha bas. Meilleure : 19,6.
     Ceiling("meilleure paire isolee (SKHYNIX/MU)", 19.60, COST_DOMINATES, 17,
             "per_pair.py — 4/28 paires positives, 0/28 survivent a BH",
-            denominator=CAPITAL, aggregation=PAIR),
+            denominator=CAPITAL, aggregation=PAIR,
+            evidence=MECHANISM_UNPROVEN),  # 0/28 survivants BH : non distinguable de zero
     Ceiling("carry meme sous-jacent (levier 24x, ABANDONNE)", -137.2,
             NOT_PERSISTENT, 21,
             "carry_alloc.py — 0/15 cellules positives ; alpha_peg.py pour le "
             "coussin (alpha = 0,236)",
-            denominator=CAPITAL),
+            denominator=CAPITAL,
+            evidence=MECHANISM_UNPROVEN),  # mecanisme abandonne, 0/15 cellules positives
     Ceiling("flux couvert, duree optimale (MECANISME ABANDONNE)", 33.30,
             COST_DOMINATES, 30_576,
             "buffer_alpha.py — coussin mesure a 14 j, marge reelle 5,67 %, "
             "mutualisation 2,21x ; alpha = 0,493 (marche aleatoire)",
-            denominator=CAPITAL),
+            denominator=CAPITAL,
+            evidence=MECHANISM_UNPROVEN),  # critere d'abandon declare d'avance ATTEINT : alpha = 0,493 >= 0,45
     Ceiling("MACHINE COMPLETE (allocation + mutualisation)", 10.36,
             COST_DOMINATES, 21,
             "alloc_policy.py — k=2, N=12 periodes ; 0/20 cellules survivent "
             "a Benjamini-Hochberg, n=21 entrees",
-            denominator=CAPITAL),
+            denominator=CAPITAL,
+            evidence=MECHANISM_UNPROVEN),  # 0/20 survivants BH sur n = 21 entrees
     Ceiling("non-crypto couvert (differentiel funding)", 12.84, NOT_HEDGEABLE,
             2_391, "nc_hedged.py — residu de couverture ~1 %/heure",
-            denominator=NOTIONAL),
+            denominator=NOTIONAL,
+            evidence=MECHANISM_UNPROVEN),  # residu de couverture ~1 %/heure : non couvrable
     Ceiling("carry inverse/lineaire", 0.57, COST_DOMINATES, 4_135,
-            "carry_capital.py — R(T) sur bareme reel et coussin mesure"),
+            "carry_capital.py — R(T) sur bareme reel et coussin mesure",
+            evidence=UNQUALIFIED),  # non re-verifiable ici : l'historique de funding n'est pas versionne
     Ceiling("basis futures dates", 2.10, NO_MAGNITUDE, FUTURES_DATES,
             "prix executables, 28 contrats — 1,9 a 7,7 %/an",
-            denominator=NOTIONAL),
+            denominator=NOTIONAL,
+            evidence=UNQUALIFIED),  # prix cotes, aucune execution simulee
     Ceiling("prime de variance (options BTC)", 0.90, NO_MAGNITUDE, 664,
             "IV cotee contre 400 j de volatilite realisee — signe alternant",
-            denominator=NOTIONAL),
+            denominator=NOTIONAL,
+            evidence=UNQUALIFIED),  # IV cotee contre volatilite realisee, aucune execution
     Ceiling("microstructure taker OKX", -10.35, NO_MAGNITUDE, 617_820,
-            "EXPERIMENT_REPORT — net a latence nulle et frais nuls"),
+            "EXPERIMENT_REPORT — net a latence nulle et frais nuls",
+            evidence=MECHANISM_UNPROVEN),  # frais ET latence mis a zero : viole la condition 2
     Ceiling("fourniture de liquidite (maker)", -1.98, COST_DOMINATES, 72_000,
-            "mm_bh.py — selection adverse > demi-spread sur 12/13"),
+            "mm_bh.py — selection adverse > demi-spread sur 12/13",
+            evidence=FILL_UNKNOWN),  # remplissage passif suppose
     # PLANCHER DU COUT. Le mandat ordonne de travailler le COUT quand le brut
     # existe et que le net est negatif. Le frais maker nul EXISTE : bareme
     # public MEXC, makerCommission 0. En annulant entierement le terme de
@@ -177,37 +193,47 @@ PLAFONDS = [
             NO_MAGNITUDE, 21_240,
             "policy_fit.py — aucune cellule d'etat ne vaut mieux que "
             "NO_TRADE, ni en apprentissage ni en test",
-            denominator=CAPITAL),
+            denominator=CAPITAL,
+            evidence=EXECUTABLE),  # remplissage certain, bareme reel, coupure temporelle stricte
     Ceiling("politique adaptative, entree passive (BORNE SUP.)", -31_425.79,
             NO_MAGNITUDE, 465,
             "policy_costfloor.py — train +2,85 -> test -3,47 bps/trade ; "
             "negatif jusqu'a un frais maker de zero ; 2,6 h de test",
-            denominator=CAPITAL),
+            denominator=CAPITAL,
+            evidence=FILL_UNKNOWN),  # entree passive, probabilite de remplissage INCONNUE
     Ceiling("fourniture de liquidite a FRAIS NULS (plancher du cout)", 13.60,
             NO_MAGNITUDE, 97,
             "fee_floor_bh.py — 0/17 survivent a BH par blocs disjoints ; "
             "borne du quasi-survivant DOT-USD-SWAP, file supposee gagnee",
-            denominator=CAPITAL, aggregation=PAIR),
+            denominator=CAPITAL, aggregation=PAIR,
+            evidence=FILL_UNKNOWN),  # file d'attente SUPPOSEE gagnee, et frais mis a zero
     Ceiling("dislocation transversale", -0.04, COST_DOMINATES, 22_465,
-            "xsec.py — 0/56 cellules positives, frais nuls compris"),
+            "xsec.py — 0/56 cellules positives, frais nuls compris",
+            evidence=MECHANISM_UNPROVEN),  # frais nuls compris : viole la condition 2
     Ceiling("funding inter-venues OKX/Hyperliquid", -23.03, NOT_PERSISTENT, 26,
             "xvenue_persistence.py — le signe ne persiste pas",
-            denominator=NOTIONAL),
+            denominator=NOTIONAL,
+            evidence=MECHANISM_UNPROVEN),  # le signe ne persiste pas
     Ceiling("flux de liquidation", -8.03, NO_MAGNITUDE, 399,
-            "post-evenement 2,97 bps contre 11 bps d'aller-retour"),
+            "post-evenement 2,97 bps contre 11 bps d'aller-retour",
+            evidence=EXECUTABLE),  # post-evenement taker contre cout d'aller-retour reel
     Ceiling("markout Polymarket", -1_000.0, MEASUREMENT_INVALID, 32_714,
-            "97,3 % de markouts nuls — la donnee ne porte pas la mesure"),
+            "97,3 % de markouts nuls — la donnee ne porte pas la mesure",
+            evidence=MECHANISM_UNPROVEN),  # 97,3 % de markouts nuls : la mesure ne porte pas
 ]
 
 
 def build() -> Dashboard:
     reg = KillRegistry.from_list(PLAFONDS)
-    best = reg.best_known()
+    borne = reg.best_known()
+    demo = reg.best_demonstrated()
     d = Dashboard(
         mode=SystemMode.DISCOVERY,
         objective=OBJECTIF,
-        best_economy_bps_per_day=best.ceiling_bps_per_day,
-        best_economy_label=best.family,
+        best_economy_bps_per_day=(demo.ceiling_bps_per_day if demo else None),
+        best_economy_label=(demo.family if demo else ""),
+        upper_bound_bps_per_day=borne.ceiling_bps_per_day,
+        upper_bound_label=f"{borne.family} — {borne.evidence}",
         bottleneck=(
             "DEMONTRE, ET NON PLUS AFFIRME. Le choix d'univers a ete mesure "
             "et non herite : budget economique de 3 419 instruments sur quatre "
@@ -260,18 +286,31 @@ def build() -> Dashboard:
             "montre que l'ecart n'est imputable ni au cout (0,0000) ni a la "
             "taille (0,0000)."),
         next_action=(
-            "AUCUNE que je puisse justifier economiquement. Je ne propose pas "
-            "une cinquieme variante des formes fermees, et je n'ai pas "
-            "d'observable qui rende une cinquieme FORME mesurable. Le "
-            "dernier levier que le mandat designait — reduire le cout — a "
-            "ete pousse a son plancher arithmetique et ne suffit pas."),
+            "MESURER LE FLUX SUBI SUR LES MARCHES SUBVENTIONNES. Une FORME de "
+            "gain que ce registre n'avait jamais examinee a ete mesuree : la "
+            "SUBVENTION. Polymarket publie, par marche, un montant quotidien "
+            "en USDC verse aux ordres qui dorment dans une bande autour du "
+            "mid — un contrat, pas une anticipation. Il n'y a rien a predire, "
+            "et le maker n'y paie aucun frais. Avec la formule publiee "
+            "(score decroissant en CARRE de la distance au mid, cote le plus "
+            "faible retenu) et quatre filtres declares d'avance, 1 000 EUR "
+            "captent 4,77 %/jour BRUT contre 2,72 vises : scans/subsidy.py. "
+            "La prochaine action n'est PAS de coter. C'est de rejouer la "
+            "bande publique des echanges contre un ordre simule "
+            "(subsidy/tape.py) pour chiffrer le cout de neutralisation, qui "
+            "est le seul terme manquant du net — et il se mesure sans "
+            "engager un centime."),
         next_action_why=(
-            "Ce n'est pas une limite de DONNEES : plus d'historique de funding "
-            "validerait le 33,3 sans l'elever, et la concession de 0,26 bps "
-            "est une propriete structurelle de la densite des carnets, mesuree "
-            "sur 29 038 rafales. Les sources d'economie qui restent exigent ce "
-            "que ce compte n'a pas — latence, information, ou une position du "
-            "cote de la venue — et non davantage de donnees."),
+            "Parce que le brut n'est pas un profit et que six inconnues "
+            "peuvent en retourner le signe (subsidy.economics.UNKNOWNS). La "
+            "plus lourde est le flux : la subvention s'encaisse sans frais, "
+            "mais NEUTRALISER un inventaire est une traversee, et le taker y "
+            "paie 4 a 7 % selon la categorie — zero sur le seul segment "
+            "geopolitique. Sur un binaire, YES + NO = 1,00 $ par "
+            "construction : le cout d'un remplissage se LIT au carnet au lieu "
+            "de s'estimer par un markout, ce qui rend le net calculable hors "
+            "capital. C'est la premiere fois dans ce depot que le terme "
+            "manquant est mesurable sans ordre reel."),
     )
     d.add(Metric("capital disponible", 1_000.0, "EUR", OBSERVED,
                  "mandat"))
@@ -322,6 +361,31 @@ def build() -> Dashboard:
                  "etre distingue ; 58,9 h de panneau requises contre 6,5"))
     d.add(Metric("probabilite de fill maker", None, "%", UNKNOWN,
                  "aucun modele de file d'attente — tout fill maker est une borne sup."))
+    d.add(Metric("plafonds re-verifiables depuis ce depot", 3.0, "sur 21",
+                 MEASURED,
+                 "seuls candles_1h.json, margin_tiers.json et fwd_okx.json.gz "
+                 "sont versionnes ; panel.pkl, tape.pkl et l'historique de "
+                 "funding vivaient sous /tmp et n'existent plus — les autres "
+                 "plafonds sont cites, pas recalculables ici"))
+    d.add(Metric("edge brut requis par aller-retour", None, "bps", UNKNOWN,
+                 "conditions.py le mesure EN DIRECT : il vaut toujours plus "
+                 "que le cout, quels que soient rotation et levier"))
+    d.add(Metric("pool de subvention publie (Polymarket)", 13_504.0,
+                 "USDC/jour", MEASURED,
+                 "subsidy/venue.py — 921 marches actifs publiant un pool en "
+                 "USDC, lu par marche et jamais suppose"))
+    d.add(Metric("subvention BRUTE captable par 1 000 EUR", 4.77, "%/jour",
+                 MEASURED,
+                 "scans/subsidy.py — formule publiee, 4 filtres declares "
+                 "d'avance ; BRUT : le cout de neutralisation manque"))
+    d.add(Metric("cout de neutralisation d'un remplissage", None, "USD",
+                 UNKNOWN,
+                 "subsidy/tape.py existe pour le mesurer sans capital ; tant "
+                 "qu'il manque, le net est None et non zero"))
+    d.add(Metric("arbitrage deterministe Polymarket (FERME)", 0.25, "%",
+                 MEASURED,
+                 "0 violation de YES+NO=1 sur 999 paires ; 2 groupes negRisk "
+                 "sur 52, meme evenement, 0,25 % rendu a la resolution"))
     return d
 
 

@@ -20,7 +20,8 @@ from bisect import bisect_left, bisect_right
 
 from prism_v2.long_test import t_test_one_sided
 
-SCRATCH = os.environ.get("PRISM_SCAN_DIR", "/tmp/prism_scans")
+from prism_v2.scans import scan_dir as _scan_dir
+SCRATCH = _scan_dir()
 D = pickle.load(open(f"{SCRATCH}/tape.pkl", "rb"))
 quotes, trades = D["quotes"], D["trades"]
 HORIZONS = [1, 5, 30, 300]

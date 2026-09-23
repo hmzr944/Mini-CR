@@ -10,8 +10,10 @@ verifient qu'elles tiennent ensemble.
 """
 import unittest
 
-from prism_v2.kill_registry import (COST_DOMINATES, NOT_HEDGEABLE,
-                                    NOT_PERSISTENT, Ceiling, KillRegistry)
+from prism_v2.kill_registry import (COST_DOMINATES, EXECUTABLE, FILL_UNKNOWN,
+                                    MECHANISM_UNPROVEN, NOT_HEDGEABLE,
+                                    NOT_PERSISTENT, NO_MAGNITUDE,
+                                    Ceiling, KillRegistry)
 
 SEUIL = 272.0
 
@@ -109,10 +111,24 @@ class TestRevision(unittest.TestCase):
 class TestRendu(unittest.TestCase):
 
     def test_le_rendu_affiche_le_facteur_manquant(self):
+        """Le facteur manquant se compte depuis une economie EXECUTABLE.
+
+        Ce test exigeait auparavant le mot « facteur » sur un registre ne
+        contenant QUE des bornes superieures. C'etait precisement la faute
+        corrigee : annoncer « il manque un facteur N » a partir d'un nombre
+        qui n'est pas une economie. Le facteur n'apparait donc que lorsqu'un
+        plafond EXECUTABLE strictement positif existe.
+        """
         txt = REG.render(SEUIL)
-        self.assertIn("facteur", txt)
         self.assertIn("non-crypto couvert", txt)
-        self.assertIn("objectif", txt)
+        self.assertNotIn("il manque un facteur", txt)
+
+        avec = KillRegistry.from_list(list(REG.ceilings.values()) + [
+            Ceiling("executable positif", 34.0, COST_DOMINATES, 500,
+                    "taker, bareme reel", evidence=EXECUTABLE)])
+        txt2 = avec.render(SEUIL)
+        self.assertIn("il manque un facteur", txt2)
+        self.assertIn("objectif", txt2)
 
 
 if __name__ == "__main__":
@@ -183,3 +199,101 @@ class TestAgregation(unittest.TestCase):
         txt = K.from_list([C("f", 19.6, COST_DOMINATES, 17, "m",
                              aggregation=PAIR)]).render(SEUIL)
         self.assertIn("PAIRE", txt)
+
+
+class TestClasseDePreuve(unittest.TestCase):
+    """Le defaut : une borne superieure affichee comme une economie.
+
+    `best_known` renvoyait « flux couvert, duree optimale » a 33,30 bps/jour,
+    et le tableau de bord titrait dessus « MEILLEURE ECONOMIE DEMONTREE », a
+    « un facteur 8,2 » de l'objectif. Ce plafond est la borne superieure d'un
+    mecanisme ayant atteint son propre critere d'abandon declare d'avance
+    (alpha >= 0,45 ; mesure 0,493). Le denominateur et l'agregation etaient
+    types ; la CLASSE DE PREUVE ne l'etait pas, et la faute est passee par la.
+
+    Ces tests figent la separation. Ils n'autorisent aucun chiffre nouveau :
+    ils empechent un chiffre ancien de porter un titre qu'il ne merite pas.
+    """
+
+    def _reg(self):
+        return KillRegistry.from_list([
+            Ceiling("borne d'un mecanisme mort", 33.30, COST_DOMINATES, 30_576,
+                    "critere d'abandon atteint",
+                    evidence=MECHANISM_UNPROVEN),
+            Ceiling("borne a remplissage suppose", 13.60, NO_MAGNITUDE, 97,
+                    "file supposee gagnee", evidence=FILL_UNKNOWN),
+            Ceiling("resultat executable", 0.0, NO_MAGNITUDE, 21_240,
+                    "taker, bareme reel, coupure temporelle",
+                    evidence=EXECUTABLE),
+        ])
+
+    def test_classe_inconnue_refusee(self):
+        with self.assertRaises(ValueError):
+            Ceiling("x", 1.0, COST_DOMINATES, 10, "m", evidence="PROMETTEUR")
+
+    def test_classe_par_defaut_jamais_promue_en_tete(self):
+        """Un plafond dont la classe n'est pas tranchee ne titre jamais."""
+        reg = KillRegistry.from_list([
+            Ceiling("non qualifie", 99.0, COST_DOMINATES, 10, "m"),
+        ])
+        self.assertEqual(reg.best_known().ceiling_bps_per_day, 99.0)
+        self.assertIsNone(reg.best_demonstrated())
+
+    def test_best_known_reste_la_borne_la_plus_haute(self):
+        """Pour TUER un candidat, la borne la plus haute est le bon majorant."""
+        b = self._reg().best_known()
+        self.assertEqual(b.ceiling_bps_per_day, 33.30)
+        self.assertEqual(b.evidence, MECHANISM_UNPROVEN)
+
+    def test_best_demonstrated_ignore_les_bornes(self):
+        """LE DEFAUT LUI-MEME : 33,30 ne doit plus sortir comme economie."""
+        d = self._reg().best_demonstrated()
+        self.assertEqual(d.family, "resultat executable")
+        self.assertEqual(d.ceiling_bps_per_day, 0.0)
+
+    def test_aucun_executable_donne_inconnu_et_non_zero(self):
+        """Sans plafond executable, la reponse est None — jamais 0,0."""
+        reg = KillRegistry.from_list([
+            Ceiling("borne seule", 50.0, COST_DOMINATES, 10, "m",
+                    evidence=FILL_UNKNOWN)])
+        self.assertIsNone(reg.best_demonstrated())
+
+    def test_le_rendu_nomme_les_deux_et_ne_les_confond_pas(self):
+        txt = self._reg().render(272.0)
+        self.assertIn("borne superieure la plus haute", txt)
+        self.assertIn("MEILLEURE ECONOMIE EXECUTABLE DEMONTREE", txt)
+        # le titre « economie » ne doit pas porter le 33,30
+        eco = txt.split("MEILLEURE ECONOMIE EXECUTABLE DEMONTREE")[1]
+        self.assertNotIn("33.30", eco)
+        self.assertIn("resultat executable", eco)
+
+    def test_pas_de_facteur_multiplicatif_depuis_zero(self):
+        """Annoncer « il manque un facteur N » depuis 0 serait un mensonge."""
+        txt = self._reg().render(272.0)
+        self.assertIn("AUCUN facteur ne comble un ecart depuis zero", txt)
+
+
+class TestEtatReel(unittest.TestCase):
+    """Le tableau de bord reel, et non un jeu d'essai."""
+
+    def test_etat_ne_titre_plus_sur_une_borne(self):
+        from prism_v2.scans.etat import PLAFONDS, build
+        reg = KillRegistry.from_list(PLAFONDS)
+        self.assertEqual(reg.best_known().ceiling_bps_per_day, 33.30)
+        d = reg.best_demonstrated()
+        self.assertIsNotNone(d)
+        self.assertEqual(d.ceiling_bps_per_day, 0.0)
+        txt = build().render()
+        self.assertIn("BORNE SUPERIEURE LA PLUS HAUTE", txt)
+        self.assertIn("ECONOMIE EXECUTABLE DEMONTREE      0.00 bps/jour", txt)
+
+    def test_toute_famille_declare_sa_classe(self):
+        """Aucun plafond du registre reel ne reste non classe par oubli.
+
+        UNQUALIFIED est un choix legitime — « je ne peux pas trancher » — mais
+        il doit etre ECRIT, pas subi. Ce test echoue si une famille nouvelle
+        arrive sans que sa classe ait ete examinee.
+        """
+        from prism_v2.scans.etat import PLAFONDS
+        src = open("prism_v2/scans/etat.py", encoding="utf-8").read()
+        self.assertEqual(src.count("evidence="), len(PLAFONDS))

@@ -24,7 +24,8 @@ joignable depuis ce conteneur en compte environ 5 700 sur sept venues.
 import json, math, os, statistics as st, urllib.request
 from collections import defaultdict
 
-SCAN = os.environ.get("PRISM_SCAN_DIR", "/tmp/prism_scans")
+from prism_v2.scans import scan_dir as _scan_dir
+SCAN = _scan_dir()
 os.makedirs(SCAN, exist_ok=True)
 K = 2*math.sqrt(math.log(2.0))          # Parkinson
 

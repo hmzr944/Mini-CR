@@ -33,7 +33,8 @@ from prism_v2.policy.crosssec import CROSS_FEATURES, CrossSection, Grid
 from prism_v2.policy.state import FEATURES, StateBuilder, StateConfig, flow_median
 from prism_v2.policy.value import fit_binner
 
-SCRATCH = os.environ.get("PRISM_SCAN_DIR", "/tmp/prism_scans")
+from prism_v2.scans import scan_dir as _scan_dir
+SCRATCH = _scan_dir()
 TRAIN_FRACTION = 0.60
 CFG = StateConfig(short_rows=20, long_rows=200)
 #: Horizons en pas de grille (300 ms). Un avance-retard vit a la seconde :

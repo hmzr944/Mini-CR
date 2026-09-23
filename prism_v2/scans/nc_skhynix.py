@@ -18,7 +18,8 @@ Quatre verifications, dans cet ordre :
   4. une couverture par un perpetuel correle change-t-elle le resultat ?
 """
 import datetime as dt, json, math, os as _os, statistics as st
-_SCAN = _os.environ.get('PRISM_SCAN_DIR', '/tmp/prism_scans')
+from prism_v2.scans import scan_dir as _scan_dir
+_SCAN = _scan_dir()
 _os.makedirs(_SCAN, exist_ok=True)
 
 from prism_v2.funding_feed import _http_json, OKX_BASE

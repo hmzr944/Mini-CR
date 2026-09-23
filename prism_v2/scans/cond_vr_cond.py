@@ -27,7 +27,8 @@ reel. Un effet statistique sans economie nette n'est pas une decouverte.
 import json, math, os, statistics as st, time, urllib.request
 from collections import defaultdict
 
-SCAN = os.environ.get("PRISM_SCAN_DIR", "/tmp/prism_scans")
+from prism_v2.scans import scan_dir as _scan_dir
+SCAN = _scan_dir()
 FEES = {"OKX": 5.0, "MEXC": 2.0, "Bitget": 6.0}
 QS = [2, 4, 8, 16, 32]
 TRAIL, NB = 24, 5

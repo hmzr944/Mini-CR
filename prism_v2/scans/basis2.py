@@ -14,7 +14,8 @@ import pickle, statistics as st
 import os as _os
 #: Repertoire de travail des mesures. Les fichiers intermediaires (panneau,
 #: bande) n'ont pas leur place dans le depot : ils se recalculent.
-SCRATCH = _os.environ.get("PRISM_SCAN_DIR", "/tmp/prism_scans")
+from prism_v2.scans import scan_dir as _scan_dir
+SCRATCH = _scan_dir()
 _os.makedirs(SCRATCH, exist_ok=True)
 
 from bisect import bisect_right

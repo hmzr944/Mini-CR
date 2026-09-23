@@ -24,7 +24,8 @@ BORNE SUPERIEURE, file supposee gagnee a chaque transaction.
 import pickle, statistics as st, math, os
 from bisect import bisect_left, bisect_right
 
-SCRATCH = os.environ.get("PRISM_SCAN_DIR", "/tmp/prism_scans")
+from prism_v2.scans import scan_dir as _scan_dir
+SCRATCH = _scan_dir()
 D = pickle.load(open(f"{SCRATCH}/tape.pkl", "rb"))
 quotes, trades = D["quotes"], D["trades"]
 

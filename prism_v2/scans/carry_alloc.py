@@ -14,7 +14,8 @@ import json, math, os, statistics as st, time
 from prism_v2.funding_feed import _http_json, OKX_BASE
 from prism_v2.long_test import t_test_one_sided, benjamini_hochberg
 
-SCAN = os.environ.get("PRISM_SCAN_DIR", "/tmp/prism_scans")
+from prism_v2.scans import scan_dir as _scan_dir
+SCAN = _scan_dir()
 BASES = ["ADA","BCH","BTC","DOGE","DOT","ETC","ETH","FIL","LINK","LTC","SOL","XRP"]
 COUSSIN = {1:0.00247,2:0.00286,3:0.00310,5:0.00339,7:0.00369,
            10:0.00399,14:0.00441,20:0.00485,30:0.00569}

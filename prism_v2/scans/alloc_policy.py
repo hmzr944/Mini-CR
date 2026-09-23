@@ -22,7 +22,8 @@ import json, math, os, statistics as st
 from prism_v2.funding_feed import _http_json, OKX_BASE
 from prism_v2.long_test import t_test_one_sided, benjamini_hochberg
 
-SCAN = os.environ.get("PRISM_SCAN_DIR", "/tmp/prism_scans")
+from prism_v2.scans import scan_dir as _scan_dir
+SCAN = _scan_dir()
 PAIRES = [("SKHYNIX","SAMSUNG"),("SKHYNIX","MU"),("SKHYNIX","SOXL"),
           ("SAMSUNG","MU"),("MU","SOXL"),("NVDA","MRVL"),("NVDA","SOXL"),
           ("MRVL","MU"),("INTC","MU"),("TSLA","NVDA"),("MSTR","CRCL"),
